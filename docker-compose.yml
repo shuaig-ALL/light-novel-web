@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: light-novel-backend
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_PATH: /app/data/light_novel.db
+      STORAGE_DIR: /app/storage
+    volumes:
+      - ln_db:/app/data
+      - ln_storage:/app/storage
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: light-novel-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8080}:80"
+
+volumes:
+  ln_db:
+    name: light_novel_db
+  ln_storage:
+    name: light_novel_storage

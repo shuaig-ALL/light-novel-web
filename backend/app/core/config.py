@@ -14,11 +14,12 @@ BACKEND_ENV_PATH = BASE_DIR / ".env"
 load_dotenv(ROOT_ENV_PATH, override=False, encoding="utf-8-sig")
 load_dotenv(BACKEND_ENV_PATH, override=False, encoding="utf-8-sig")
 
-STORAGE_DIR = BASE_DIR / "storage"
+STORAGE_DIR = Path(os.getenv("STORAGE_DIR", str(BASE_DIR / "storage"))).resolve()
 BOOKS_STORAGE_DIR = STORAGE_DIR / "books"
 STATIC_URL_PREFIX = "/static"
 
-DB_PATH = BASE_DIR / "light_novel.db"
+DB_PATH = Path(os.getenv("DATABASE_PATH", str(BASE_DIR / "light_novel.db"))).resolve()
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH.as_posix()}"
 
 DEFAULT_SPINE_COLOR = "#4A5568"
