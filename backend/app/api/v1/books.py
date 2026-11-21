@@ -6,9 +6,11 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import config
 from app.core.config import BOOKS_STORAGE_DIR
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -16,6 +18,7 @@ from app.models.book import Book, Chapter
 from app.models.reading_progress import ReadingProgress
 from app.models.user import User
 from app.schemas.book import (
+    AIAssistRequest,
     BookDeleteResponse,
     BookIllustrationsResponse,
     BookListItem,
@@ -26,6 +29,11 @@ from app.schemas.book import (
     IllustrationItem,
     ReadingProgressResponse,
     ReadingProgressUpdate,
+)
+from app.services.ai_service import (
+    build_ai_messages,
+    build_spoiler_free_context,
+    stream_ai_assist,
 )
 from app.services.epub_parser import parse_epub_book
 
@@ -426,4 +434,113 @@ async def get_book_illustrations(
         title=book.title,
         total=len(illustrations),
         illustrations=illustrations,
+    )
+
+
+@router.post("/{book_id}/ai/assist")
+async def ai_assist_book(
+    book_id: int,
+    payload: AIAssistRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    book = await _get_owned_book(book_id, current_user.id, db)
+
+    if payload.mode == "qa" and not (payload.question and payload.question.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请输入你想询问的问题。",
+        )
+
+    llm_settings = config.get_llm_settings()
+    if not llm_settings.api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="尚未配置 AI 模型密钥（LLM_API_KEY）。请复制根目录 .env.example 为 .env，填入 LLM_API_KEY 后重启后端服务。",
+        )
+
+    # Determine strict spoiler-free boundary chapter
+    boundary_chapter: Chapter | None = None
+    if payload.chapter_id is not None:
+        ch_res = await db.execute(
+            select(Chapter).where(
+                Chapter.book_id == book.id,
+                Chapter.id == payload.chapter_id,
+            )
+        )
+        boundary_chapter = ch_res.scalar_one_or_none()
+        if boundary_chapter is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"未找到章节 (book_id={book_id}, chapter_id={payload.chapter_id})。",
+            )
+    else:
+        prog_res = await db.execute(
+            select(ReadingProgress).where(
+                ReadingProgress.user_id == current_user.id,
+                ReadingProgress.book_id == book.id,
+            )
+        )
+        progress = prog_res.scalar_one_or_none()
+        if progress is not None:
+            ch_res = await db.execute(
+                select(Chapter).where(
+                    Chapter.book_id == book.id,
+                    Chapter.id == progress.chapter_id,
+                )
+            )
+            boundary_chapter = ch_res.scalar_one_or_none()
+
+        if boundary_chapter is None:
+            first_res = await db.execute(
+                select(Chapter)
+                .where(Chapter.book_id == book.id)
+                .order_by(Chapter.order_index.asc())
+                .limit(1)
+            )
+            boundary_chapter = first_res.scalar_one_or_none()
+
+    if boundary_chapter is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该书暂无可供分析的已解析章节。",
+        )
+
+    # Hard SQL spoiler boundary: strictly exclude every chapter after boundary_chapter.order_index
+    read_chapters_res = await db.execute(
+        select(Chapter)
+        .where(
+            Chapter.book_id == book.id,
+            Chapter.order_index <= boundary_chapter.order_index,
+        )
+        .order_by(Chapter.order_index.asc())
+    )
+    read_chapters = list(read_chapters_res.scalars().all())
+
+    context_text, included_count = build_spoiler_free_context(
+        read_chapters, max_chars=llm_settings.max_context_chars
+    )
+    messages = build_ai_messages(
+        book_title=book.title,
+        book_author=book.author,
+        max_order_index=boundary_chapter.order_index,
+        max_chapter_title=boundary_chapter.title,
+        context_text=context_text,
+        mode=payload.mode,
+        question=payload.question,
+    )
+
+    return StreamingResponse(
+        stream_ai_assist(
+            messages=messages,
+            max_order_index=boundary_chapter.order_index,
+            max_chapter_title=boundary_chapter.title,
+            included_chapters=included_count,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )

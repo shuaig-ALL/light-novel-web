@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -98,3 +99,9 @@ class BookIllustrationsResponse(BaseModel):
     title: str
     total: int
     illustrations: list[IllustrationItem]
+
+
+class AIAssistRequest(BaseModel):
+    mode: Literal["recap", "characters", "qa"]
+    chapter_id: int | None = Field(default=None, gt=0)
+    question: str | None = Field(default=None, max_length=1000)

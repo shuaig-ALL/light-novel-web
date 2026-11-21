@@ -1,4 +1,9 @@
-import { apiClient } from './client'
+import {
+  apiClient,
+  clearStoredToken,
+  getStoredToken,
+  UNAUTHORIZED_EVENT,
+} from './client'
 
 export type ParseStatus = 'pending' | 'processing' | 'completed' | 'failed'
 
@@ -89,6 +94,27 @@ export interface BookIllustrationsResponse {
   illustrations: IllustrationItem[]
 }
 
+export type AIAssistMode = 'recap' | 'characters' | 'qa'
+
+export interface AIAssistPayload {
+  mode: AIAssistMode
+  chapter_id?: number
+  question?: string
+}
+
+export interface AIAssistMeta {
+  max_order_index: number
+  chapter_title: string
+  included_chapters: number
+}
+
+export interface AIAssistStreamHandlers {
+  onMeta?: (meta: AIAssistMeta) => void
+  onDelta: (content: string) => void
+  onDone?: () => void
+  onError?: (message: string) => void
+}
+
 export async function uploadBook(
   file: File,
   onProgress?: (percent: number) => void,
@@ -159,4 +185,111 @@ export async function getBookIllustrations(
     `/books/${bookId}/illustrations`,
   )
   return data
+}
+
+export async function streamBookAIAssist(
+  bookId: number,
+  payload: AIAssistPayload,
+  handlers: AIAssistStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const token = getStoredToken()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+  }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
+  const response = await fetch(`/api/v1/books/${bookId}/ai/assist`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+    signal,
+  })
+
+  if (response.status === 401) {
+    clearStoredToken()
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+    throw new Error('登录状态已失效，请重新登录。')
+  }
+
+  if (!response.ok) {
+    let detail = `请求失败（HTTP ${response.status}）`
+    try {
+      const errJson = await response.json()
+      if (typeof errJson?.detail === 'string' && errJson.detail.trim()) {
+        detail = errJson.detail.trim()
+      }
+    } catch {
+      // Fall back to default message
+    }
+    throw new Error(detail)
+  }
+
+  if (!response.body) {
+    throw new Error('浏览器不支持流式响应读取。')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+
+  const processLine = (rawLine: string) => {
+    const line = rawLine.trim()
+    if (!line || !line.startsWith('data:')) {
+      return
+    }
+    const jsonPart = line.slice(5).trim()
+    if (!jsonPart) {
+      return
+    }
+    try {
+      const event = JSON.parse(jsonPart) as
+        | ({ type: 'meta' } & AIAssistMeta)
+        | { type: 'delta'; content: string }
+        | { type: 'done' }
+        | { type: 'error'; message: string }
+
+      if (event.type === 'meta') {
+        handlers.onMeta?.({
+          max_order_index: event.max_order_index,
+          chapter_title: event.chapter_title,
+          included_chapters: event.included_chapters,
+        })
+      } else if (event.type === 'delta' && event.content) {
+        handlers.onDelta(event.content)
+      } else if (event.type === 'error') {
+        handlers.onError?.(event.message || 'AI 生成发生错误。')
+      } else if (event.type === 'done') {
+        handlers.onDone?.()
+      }
+    } catch {
+      // Ignore malformed chunk
+    }
+  }
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) {
+        break
+      }
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        processLine(line)
+      }
+    }
+    buffer += decoder.decode()
+    if (buffer.trim()) {
+      for (const line of buffer.split(/\r?\n/)) {
+        processLine(line)
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
 }

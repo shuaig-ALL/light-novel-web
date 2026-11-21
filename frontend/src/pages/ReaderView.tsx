@@ -12,6 +12,7 @@ import {
   Moon,
   Plus,
   ScrollText,
+  Sparkles,
   Sun,
   X,
 } from 'lucide-react'
@@ -34,6 +35,7 @@ import {
   type ChapterDetailResponse,
 } from '../api/books'
 import { getApiErrorMessage, getStoredToken } from '../api/client'
+import { AIAssistDrawer } from '../components/AIAssistDrawer'
 import { IllustrationGalleryModal } from '../components/IllustrationGalleryModal'
 import { InlineImageLightbox } from '../components/InlineImageLightbox'
 import {
@@ -194,6 +196,7 @@ export function ReaderView() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [tocOpen, setTocOpen] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  const [aiDrawerOpen, setAiDrawerOpen] = useState(false)
   const [inlineLightbox, setInlineLightbox] = useState<{
     src: string
     alt: string | null
@@ -678,7 +681,7 @@ export function ReaderView() {
 
   // Keyboard shortcuts: Left / Right for page (paginated) or chapter (scroll), Esc to close TOC
   useEffect(() => {
-    if (galleryOpen || inlineLightbox !== null) {
+    if (galleryOpen || aiDrawerOpen || inlineLightbox !== null) {
       return
     }
     const onKeyDown = (event: KeyboardEvent) => {
@@ -703,7 +706,7 @@ export function ReaderView() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [galleryOpen, inlineLightbox, tocOpen, isPaginated, goPrevChapter, goNextChapter])
+  }, [galleryOpen, aiDrawerOpen, inlineLightbox, tocOpen, isPaginated, goPrevChapter, goNextChapter])
 
   const currentReadOrderIndex = useMemo(() => {
     const activeOrder = chapter?.order_index ?? 0
@@ -765,6 +768,19 @@ export function ReaderView() {
               >
                 <Images className="h-3.5 w-3.5" />
                 <span className="hidden md:inline">插画</span>
+              </button>
+            )}
+
+            {chapter && (
+              <button
+                type="button"
+                onClick={() => setAiDrawerOpen(true)}
+                title="防剧透 AI 助手"
+                aria-label="打开防剧透 AI 助手"
+                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${styles.button}`}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span className="hidden md:inline">AI 助手</span>
               </button>
             )}
           </div>
@@ -1172,6 +1188,18 @@ export function ReaderView() {
           currentReadOrderIndex={currentReadOrderIndex}
           hideUnread={user.hide_unread_illustrations}
           onClose={() => setGalleryOpen(false)}
+        />
+      )}
+
+      {/* Spoiler-free AI Assistant Right Drawer */}
+      {aiDrawerOpen && chapter && !isInvalidBookId && (
+        <AIAssistDrawer
+          bookId={bookId}
+          bookTitle={toc?.title || ''}
+          chapterId={chapter.id}
+          chapterOrderIndex={chapter.order_index}
+          chapterTitle={chapter.title}
+          onClose={() => setAiDrawerOpen(false)}
         />
       )}
 
