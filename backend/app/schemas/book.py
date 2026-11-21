@@ -79,3 +79,19 @@ class ReadingProgressResponse(BaseModel):
     chapter_id: int
     scroll_percent: float
     updated_at: datetime
+
+
+class IllustrationItem(BaseModel):
+    url: str
+    alt: str | None = None
+    is_cover: bool = False
+    chapter_id: int | None = None
+    chapter_order_index: int
+    chapter_title: str
+
+
+class BookIllustrationsResponse(BaseModel):
+    book_id: int
+    title: str
+    total: int
+    illustrations: list[IllustrationItem]

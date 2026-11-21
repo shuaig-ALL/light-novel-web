@@ -3,6 +3,7 @@ import {
   BookOpenText,
   ChevronLeft,
   ChevronRight,
+  Images,
   List,
   Loader2,
   Minus,
@@ -22,6 +23,8 @@ import {
   type ChapterDetailResponse,
 } from '../api/books'
 import { getApiErrorMessage, getStoredToken } from '../api/client'
+import { IllustrationGalleryModal } from '../components/IllustrationGalleryModal'
+import { useAuth } from '../context/useAuth'
 
 type ReaderTheme = 'light' | 'sepia' | 'dark'
 
@@ -131,6 +134,7 @@ function sendProgressKeepalive(
 const SCROLL_SYNC_DEBOUNCE_MS = 1500
 
 export function ReaderView() {
+  const { user } = useAuth()
   const { bookId: bookIdParam } = useParams<{ bookId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -152,8 +156,10 @@ export function ReaderView() {
   const [chapter, setChapter] = useState<ChapterDetailResponse | null>(null)
 
   const [loadedBookId, setLoadedBookId] = useState<number | null>(null)
+  const [cloudProgressOrderIndex, setCloudProgressOrderIndex] = useState<number>(0)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [tocOpen, setTocOpen] = useState(false)
+  const [galleryOpen, setGalleryOpen] = useState(false)
 
   const [theme, setTheme] = useState<ReaderTheme>(readInitialTheme)
   const [fontSize, setFontSize] = useState<number>(readInitialFontSize)
@@ -245,6 +251,14 @@ export function ReaderView() {
         }
 
         shouldScrollTopOnNextChapterRef.current = false
+        if (cloudProgress && cloudChapterId) {
+          const matchedTocChapter = tocData.chapters.find(
+            (c) => c.id === cloudChapterId,
+          )
+          if (matchedTocChapter) {
+            setCloudProgressOrderIndex(matchedTocChapter.order_index)
+          }
+        }
         if (cloudProgress && cloudChapterId === resolvedChapterId) {
           lastSyncedRef.current = {
             chapterId: cloudProgress.chapter_id,
@@ -484,6 +498,9 @@ export function ReaderView() {
 
   // Keyboard shortcuts: Left / Right for prev/next chapter, Esc to close TOC
   useEffect(() => {
+    if (galleryOpen) {
+      return
+    }
     const onKeyDown = (event: KeyboardEvent) => {
       const tag = (event.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
@@ -498,7 +515,12 @@ export function ReaderView() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [tocOpen, goPrev, goNext])
+  }, [galleryOpen, tocOpen, goPrev, goNext])
+
+  const currentReadOrderIndex = useMemo(() => {
+    const activeOrder = chapter?.order_index ?? 0
+    return Math.max(cloudProgressOrderIndex, activeOrder)
+  }, [cloudProgressOrderIndex, chapter])
 
   const currentChapterPosition = useMemo(() => {
     if (!toc || !chapter) return null
@@ -531,6 +553,19 @@ export function ReaderView() {
               <List className="h-3.5 w-3.5" />
               <span>目录</span>
             </button>
+
+            {user?.enable_gallery && (
+              <button
+                type="button"
+                onClick={() => setGalleryOpen(true)}
+                title="插画画廊"
+                aria-label="打开插画画廊"
+                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${styles.button}`}
+              >
+                <Images className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">插画</span>
+              </button>
+            )}
           </div>
 
           {/* Center: Book & chapter title */}
@@ -788,6 +823,16 @@ export function ReaderView() {
             </div>
           </aside>
         </div>
+      )}
+      {/* On-demand spoiler-safe Illustration Gallery & Lightbox */}
+      {galleryOpen && user?.enable_gallery && !isInvalidBookId && (
+        <IllustrationGalleryModal
+          bookId={bookId}
+          bookTitle={toc?.title || ''}
+          currentReadOrderIndex={currentReadOrderIndex}
+          hideUnread={user.hide_unread_illustrations}
+          onClose={() => setGalleryOpen(false)}
+        />
       )}
     </div>
   )

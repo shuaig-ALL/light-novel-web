@@ -14,12 +14,19 @@ class UserLoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=128)
 
 
+class UserPreferencesUpdate(BaseModel):
+    enable_gallery: bool | None = None
+    hide_unread_illustrations: bool | None = None
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     username: str
     email: EmailStr
+    enable_gallery: bool = False
+    hide_unread_illustrations: bool = True
     created_at: datetime
 
 

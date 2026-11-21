@@ -3,9 +3,11 @@ import {
   fetchCurrentUser,
   loginUser,
   registerUser,
+  updateUserPreferences,
   type LoginPayload,
   type RegisterPayload,
   type UserInfo,
+  type UserPreferencesPayload,
 } from '../api/auth'
 import {
   clearStoredToken,
@@ -71,6 +73,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res.user
   }, [])
 
+  const updatePreferences = useCallback(
+    async (payload: UserPreferencesPayload): Promise<UserInfo> => {
+      let previousUser: UserInfo | null = null
+      setUser((prev) => {
+        previousUser = prev
+        if (!prev) return prev
+        return {
+          ...prev,
+          ...(payload.enable_gallery !== undefined
+            ? { enable_gallery: payload.enable_gallery }
+            : {}),
+          ...(payload.hide_unread_illustrations !== undefined
+            ? { hide_unread_illustrations: payload.hide_unread_illustrations }
+            : {}),
+        }
+      })
+
+      try {
+        const updated = await updateUserPreferences(payload)
+        setUser(updated)
+        return updated
+      } catch (error) {
+        if (previousUser) {
+          setUser(previousUser)
+        }
+        throw error
+      }
+    },
+    [],
+  )
+
   const logout = useCallback(() => {
     clearStoredToken()
     setUser(null)
@@ -82,9 +115,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       initializing,
       login,
       register,
+      updatePreferences,
       logout,
     }),
-    [user, initializing, login, register, logout],
+    [user, initializing, login, register, updatePreferences, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

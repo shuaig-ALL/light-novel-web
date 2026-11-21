@@ -13,6 +13,7 @@ from app.models.user import User
 from app.schemas.auth import (
     TokenResponse,
     UserLoginRequest,
+    UserPreferencesUpdate,
     UserRegisterRequest,
     UserResponse,
 )
@@ -100,4 +101,20 @@ async def login(
 async def get_me(
     current_user: User = Depends(get_current_user),
 ) -> UserResponse:
+    return UserResponse.model_validate(current_user)
+
+
+@router.patch("/preferences", response_model=UserResponse)
+async def update_preferences(
+    payload: UserPreferencesUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    if payload.enable_gallery is not None:
+        current_user.enable_gallery = payload.enable_gallery
+    if payload.hide_unread_illustrations is not None:
+        current_user.hide_unread_illustrations = payload.hide_unread_illustrations
+
+    await db.commit()
+    await db.refresh(current_user)
     return UserResponse.model_validate(current_user)

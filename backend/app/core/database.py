@@ -1,6 +1,6 @@
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -38,6 +38,27 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+def _ensure_user_preference_columns(sync_conn) -> None:
+    """Non-destructive SQLite schema upgrade for existing local databases."""
+    rows = sync_conn.execute(text("PRAGMA table_info(users)")).fetchall()
+    existing_cols = {row[1] for row in rows}
+    if not existing_cols:
+        return
+
+    if "enable_gallery" not in existing_cols:
+        sync_conn.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN enable_gallery BOOLEAN NOT NULL DEFAULT 0"
+            )
+        )
+    if "hide_unread_illustrations" not in existing_cols:
+        sync_conn.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN hide_unread_illustrations BOOLEAN NOT NULL DEFAULT 1"
+            )
+        )
+
+
 async def init_db() -> None:
     # Ensure all ORM models are registered on Base.metadata before creating tables.
     import app.models.book  # noqa: F401
@@ -46,3 +67,4 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_ensure_user_preference_columns)

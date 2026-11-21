@@ -1,4 +1,4 @@
-import { BookOpen, Loader2, LogOut, RefreshCw, Trash2, Upload, User, X } from 'lucide-react'
+import { BookOpen, Loader2, LogOut, RefreshCw, Settings, Trash2, Upload, User, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deleteBook, getBooks, uploadBook, type BookListItem } from '../api/books'
@@ -8,7 +8,7 @@ import { useAuth } from '../context/useAuth'
 
 export function HomeShelf() {
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user, updatePreferences, logout } = useAuth()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const [books, setBooks] = useState<BookListItem[]>([])
@@ -17,6 +17,9 @@ export function HomeShelf() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [bookToDelete, setBookToDelete] = useState<BookListItem | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [savingPrefs, setSavingPrefs] = useState(false)
+  const [prefsError, setPrefsError] = useState<string | null>(null)
   const [notice, setNotice] = useState<{ type: 'info' | 'error'; text: string } | null>(null)
 
   const refreshBooks = useCallback(async (showSpinner = false) => {
@@ -83,19 +86,38 @@ export function HomeShelf() {
     return () => window.clearInterval(timer)
   }, [hasPendingBooks, refreshBooks])
 
-  // Close delete confirmation modal with Escape
+  // Close delete confirmation or settings modal with Escape
   useEffect(() => {
-    if (!bookToDelete) {
+    if (!bookToDelete && !settingsOpen) {
       return
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !deleting) {
-        setBookToDelete(null)
+      if (event.key === 'Escape') {
+        if (bookToDelete && !deleting) {
+          setBookToDelete(null)
+        } else if (settingsOpen) {
+          setSettingsOpen(false)
+        }
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [bookToDelete, deleting])
+  }, [bookToDelete, deleting, settingsOpen])
+
+  const handleTogglePreference = async (
+    key: 'enable_gallery' | 'hide_unread_illustrations',
+    nextValue: boolean,
+  ) => {
+    setPrefsError(null)
+    setSavingPrefs(true)
+    try {
+      await updatePreferences({ [key]: nextValue })
+    } catch (error) {
+      setPrefsError(getApiErrorMessage(error, '保存偏好设置失败，请稍后重试'))
+    } finally {
+      setSavingPrefs(false)
+    }
+  }
 
   const triggerFilePicker = () => {
     fileInputRef.current?.click()
@@ -243,6 +265,19 @@ export function HomeShelf() {
 
             <button
               type="button"
+              onClick={() => {
+                setPrefsError(null)
+                setSettingsOpen(true)
+              }}
+              title="偏好设置"
+              aria-label="偏好设置"
+              className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-900"
+            >
+              <Settings className="h-4 w-4" strokeWidth={1.75} />
+            </button>
+
+            <button
+              type="button"
               onClick={handleLogout}
               title="退出登录"
               aria-label="退出登录"
@@ -302,6 +337,138 @@ export function HomeShelf() {
           />
         )}
       </main>
+
+      {/* Minimalist preferences modal */}
+      {settingsOpen && user && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="preferences-dialog-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        >
+          <div
+            className="fixed inset-0 bg-zinc-950/35 backdrop-blur-[2px]"
+            onClick={() => setSettingsOpen(false)}
+          />
+
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-zinc-900">
+                  <Settings className="h-4 w-4" strokeWidth={1.75} />
+                </div>
+                <div>
+                  <h2
+                    id="preferences-dialog-title"
+                    className="text-base font-semibold text-zinc-900"
+                  >
+                    阅读偏好设置
+                  </h2>
+                  <p className="text-xs text-zinc-400">
+                    修改将实时同步至云端账号（{user.username}）
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                aria-label="关闭设置"
+                onClick={() => setSettingsOpen(false)}
+                className="cursor-pointer rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-50 hover:text-zinc-900"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {prefsError && (
+              <div
+                role="alert"
+                className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+              >
+                {prefsError}
+              </div>
+            )}
+
+            <div className="mt-5 divide-y divide-zinc-100 rounded-xl border border-zinc-200/80 bg-zinc-50/40">
+              {/* Switch 1: Enable illustration gallery */}
+              <div className="flex items-center justify-between gap-4 p-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-zinc-900">
+                    启用插画画廊
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
+                    开启后在阅读器顶部工具栏显示全书插画画廊入口，关闭时保持极简界面。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={user.enable_gallery}
+                  disabled={savingPrefs}
+                  onClick={() =>
+                    void handleTogglePreference('enable_gallery', !user.enable_gallery)
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-60 ${
+                    user.enable_gallery ? 'bg-zinc-900' : 'bg-zinc-300'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4.5 w-4.5 rounded-full bg-white shadow-xs transition-transform ${
+                      user.enable_gallery ? 'translate-x-[22px]' : 'translate-x-[3px]'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Switch 2: Hide unread chapter illustrations */}
+              <div className="flex items-center justify-between gap-4 p-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-zinc-900">
+                    隐藏未读章节插画（防剧透）
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">
+                    画廊中位于当前阅读进度之后的插画默认高斯模糊遮挡，防止提前剧透。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={user.hide_unread_illustrations}
+                  disabled={savingPrefs}
+                  onClick={() =>
+                    void handleTogglePreference(
+                      'hide_unread_illustrations',
+                      !user.hide_unread_illustrations,
+                    )
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-60 ${
+                    user.hide_unread_illustrations ? 'bg-zinc-900' : 'bg-zinc-300'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4.5 w-4.5 rounded-full bg-white shadow-xs transition-transform ${
+                      user.hide_unread_illustrations
+                        ? 'translate-x-[22px]'
+                        : 'translate-x-[3px]'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between text-xs text-zinc-400">
+              <span>{savingPrefs ? '正在同步设置...' : '所有开关改动会自动保存'}</span>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="cursor-pointer rounded-lg border border-zinc-200 bg-white px-3.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
+              >
+                完成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Minimalist delete confirmation modal */}
       {bookToDelete && (

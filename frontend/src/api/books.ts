@@ -70,6 +70,22 @@ export interface ReadingProgressUpdatePayload {
   scroll_percent: number
 }
 
+export interface IllustrationItem {
+  url: string
+  alt: string | null
+  is_cover: boolean
+  chapter_id: number | null
+  chapter_order_index: number
+  chapter_title: string
+}
+
+export interface BookIllustrationsResponse {
+  book_id: number
+  title: string
+  total: number
+  illustrations: IllustrationItem[]
+}
+
 export async function uploadBook(
   file: File,
   onProgress?: (percent: number) => void,
@@ -129,6 +145,15 @@ export async function updateReadingProgress(
   const { data } = await apiClient.put<ReadingProgress>(
     `/books/${bookId}/progress`,
     payload,
+  )
+  return data
+}
+
+export async function getBookIllustrations(
+  bookId: number,
+): Promise<BookIllustrationsResponse> {
+  const { data } = await apiClient.get<BookIllustrationsResponse>(
+    `/books/${bookId}/illustrations`,
   )
   return data
 }

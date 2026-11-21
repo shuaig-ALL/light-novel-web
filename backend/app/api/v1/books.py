@@ -4,6 +4,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from bs4 import BeautifulSoup
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,11 +17,13 @@ from app.models.reading_progress import ReadingProgress
 from app.models.user import User
 from app.schemas.book import (
     BookDeleteResponse,
+    BookIllustrationsResponse,
     BookListItem,
     BookTocResponse,
     BookUploadResponse,
     ChapterDetailResponse,
     ChapterTocItem,
+    IllustrationItem,
     ReadingProgressResponse,
     ReadingProgressUpdate,
 )
@@ -306,3 +309,67 @@ async def update_reading_progress(
     await db.commit()
     await db.refresh(progress)
     return ReadingProgressResponse.model_validate(progress)
+
+
+@router.get("/{book_id}/illustrations", response_model=BookIllustrationsResponse)
+async def get_book_illustrations(
+    book_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BookIllustrationsResponse:
+    book = await _get_owned_book(book_id, current_user.id, db)
+
+    illustrations: list[IllustrationItem] = []
+    seen_urls: set[str] = set()
+
+    if book.cover_url:
+        seen_urls.add(book.cover_url)
+        illustrations.append(
+            IllustrationItem(
+                url=book.cover_url,
+                alt=f"{book.title} 封面",
+                is_cover=True,
+                chapter_id=None,
+                chapter_order_index=0,
+                chapter_title="封面",
+            )
+        )
+
+    chapter_rows = await db.execute(
+        select(
+            Chapter.id,
+            Chapter.order_index,
+            Chapter.title,
+            Chapter.content_html,
+        )
+        .where(Chapter.book_id == book.id)
+        .order_by(Chapter.order_index.asc())
+    )
+
+    for row in chapter_rows.all():
+        if not row.content_html or "<img" not in row.content_html.lower():
+            continue
+        soup = BeautifulSoup(row.content_html, "lxml")
+        for img_tag in soup.find_all("img"):
+            src = str(img_tag.get("src") or "").strip()
+            if not src or src in seen_urls:
+                continue
+            seen_urls.add(src)
+            alt_text = str(img_tag.get("alt") or "").strip() or None
+            illustrations.append(
+                IllustrationItem(
+                    url=src,
+                    alt=alt_text,
+                    is_cover=False,
+                    chapter_id=row.id,
+                    chapter_order_index=row.order_index,
+                    chapter_title=row.title,
+                )
+            )
+
+    return BookIllustrationsResponse(
+        book_id=book.id,
+        title=book.title,
+        total=len(illustrations),
+        illustrations=illustrations,
+    )

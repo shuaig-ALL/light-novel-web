@@ -4,6 +4,8 @@ export interface UserInfo {
   id: number
   username: string
   email: string
+  enable_gallery: boolean
+  hide_unread_illustrations: boolean
   created_at: string
 }
 
@@ -24,6 +26,11 @@ export interface LoginPayload {
   password: string
 }
 
+export interface UserPreferencesPayload {
+  enable_gallery?: boolean
+  hide_unread_illustrations?: boolean
+}
+
 export async function registerUser(payload: RegisterPayload): Promise<TokenResponse> {
   const { data } = await apiClient.post<TokenResponse>('/auth/register', payload)
   return data
@@ -36,5 +43,12 @@ export async function loginUser(payload: LoginPayload): Promise<TokenResponse> {
 
 export async function fetchCurrentUser(): Promise<UserInfo> {
   const { data } = await apiClient.get<UserInfo>('/auth/me')
+  return data
+}
+
+export async function updateUserPreferences(
+  payload: UserPreferencesPayload,
+): Promise<UserInfo> {
+  const { data } = await apiClient.patch<UserInfo>('/auth/preferences', payload)
   return data
 }

@@ -1,11 +1,17 @@
 import { createContext, useContext } from 'react'
-import type { LoginPayload, RegisterPayload, UserInfo } from '../api/auth'
+import type {
+  LoginPayload,
+  RegisterPayload,
+  UserInfo,
+  UserPreferencesPayload,
+} from '../api/auth'
 
 export interface AuthContextValue {
   user: UserInfo | null
   initializing: boolean
   login: (payload: LoginPayload) => Promise<UserInfo>
   register: (payload: RegisterPayload) => Promise<UserInfo>
+  updatePreferences: (payload: UserPreferencesPayload) => Promise<UserInfo>
   logout: () => void
 }
 
