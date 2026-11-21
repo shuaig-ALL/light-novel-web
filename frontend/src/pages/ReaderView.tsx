@@ -163,6 +163,8 @@ function sendProgressKeepalive(
 
 const SCROLL_SYNC_DEBOUNCE_MS = 1500
 const PAGE_SYNC_DEBOUNCE_MS = 450
+const CHROME_AUTO_HIDE_MS = 3500
+const SCROLL_HIDE_THRESHOLD_PX = 28
 
 export function ReaderView() {
   const { user, updatePreferences } = useAuth()
@@ -186,6 +188,8 @@ export function ReaderView() {
   const pageSyncTimerRef = useRef<number | null>(null)
   const dirtyScrollRef = useRef<{ chapterId: number; scrollPercent: number } | null>(null)
   const lastSyncedRef = useRef<{ chapterId: number; scrollPercent: number } | null>(null)
+  const scrollChromeAnchorYRef = useRef<number>(0)
+  const chromeVisibleRef = useRef<boolean>(true)
 
   const [toc, setToc] = useState<BookTocResponse | null>(null)
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
@@ -198,6 +202,7 @@ export function ReaderView() {
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false)
   const [chromeVisible, setChromeVisible] = useState(true)
+  const [chromeActivityTick, setChromeActivityTick] = useState(0)
   const [inlineLightbox, setInlineLightbox] = useState<{
     src: string
     alt: string | null
@@ -224,6 +229,31 @@ export function ReaderView() {
       !errorMsg,
   )
   const displayError = isInvalidBookId ? '无效的书籍 ID。' : errorMsg
+  const hasOverlayOpen =
+    tocOpen || galleryOpen || aiDrawerOpen || inlineLightbox !== null
+
+  useEffect(() => {
+    chromeVisibleRef.current = chromeVisible
+    if (chromeVisible) {
+      scrollChromeAnchorYRef.current = window.scrollY
+    }
+  }, [chromeVisible])
+
+  // Auto-hide toolbars after 3.5s of inactivity (paused while any drawer/modal/lightbox is open)
+  useEffect(() => {
+    if (!chromeVisible || hasOverlayOpen || loadingToc || Boolean(displayError) || !chapter) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setChromeVisible(false)
+    }, CHROME_AUTO_HIDE_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [chromeVisible, hasOverlayOpen, chromeActivityTick, loadingToc, displayError, chapter])
+
+  const bumpChromeActivity = useCallback(() => {
+    setChromeActivityTick((tick) => tick + 1)
+  }, [])
 
   const syncProgressToCloud = useCallback(
     (targetChapterId: number, scrollPercent: number, force = false) => {
@@ -492,7 +522,16 @@ export function ReaderView() {
 
     const handleScroll = () => {
       if (Date.now() < suppressScrollSyncUntilRef.current) {
+        scrollChromeAnchorYRef.current = window.scrollY
         return
+      }
+      // Auto-dismiss open toolbars once user scrolls deliberately past threshold
+      if (
+        chromeVisibleRef.current &&
+        Math.abs(window.scrollY - scrollChromeAnchorYRef.current) >=
+          SCROLL_HIDE_THRESHOLD_PX
+      ) {
+        setChromeVisible(false)
       }
       const currentPercent = computeScrollPercent()
       dirtyScrollRef.current = {
@@ -583,6 +622,7 @@ export function ReaderView() {
       setActiveChapterId(targetId)
       setSearchParams({ chapter: String(targetId) }, { replace: true })
       setTocOpen(false)
+      setChromeVisible(false)
       const initialPercent =
         landing.type === 'last' ? 100 : landing.type === 'percent' ? landing.value : 0
       syncProgressToCloud(targetId, initialPercent, true)
@@ -620,6 +660,9 @@ export function ReaderView() {
 
   const handlePaginatedUserTurn = useCallback(
     (percent: number) => {
+      if (chromeVisibleRef.current) {
+        setChromeVisible(false)
+      }
       if (!activeChapterId) {
         return
       }
@@ -672,17 +715,54 @@ export function ReaderView() {
     ],
   )
 
-  const handleScrollArticleClick = useCallback((event: MouseEvent<HTMLElement>) => {
-    const target = event.target as HTMLElement | null
-    const imgEl = target?.closest('img')
-    if (imgEl instanceof HTMLImageElement) {
-      setInlineLightbox({ src: imgEl.src, alt: imgEl.alt || null })
-    }
+  const toggleChrome = useCallback(() => {
+    setChromeVisible((prev) => {
+      const next = !prev
+      if (next) {
+        scrollChromeAnchorYRef.current = window.scrollY
+      }
+      return next
+    })
+    setChromeActivityTick((tick) => tick + 1)
   }, [])
 
-  const toggleChrome = useCallback(() => {
-    setChromeVisible((prev) => !prev)
-  }, [])
+  const handleScrollStageClick = useCallback(
+    (event: MouseEvent<HTMLElement>) => {
+      const target = event.target as HTMLElement | null
+      if (!target) {
+        return
+      }
+
+      // Priority 1: Inline illustration click opens fullscreen lightbox
+      const imgEl = target.closest('img')
+      if (imgEl instanceof HTMLImageElement) {
+        setInlineLightbox({ src: imgEl.src, alt: imgEl.alt || null })
+        return
+      }
+
+      // Priority 2: Ignore clicks on interactive controls or when text is selected
+      if (target.closest('a, button, input, textarea, nav, header, footer')) {
+        return
+      }
+      const selection = window.getSelection()
+      if (selection && selection.toString().trim().length > 0) {
+        return
+      }
+
+      // Priority 3: Center zone tap (horizontal 30%~70%, vertical outside top/bottom bars)
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      if (vw <= 0 || vh <= 0) {
+        return
+      }
+      const relX = event.clientX / vw
+      const inVerticalContentZone = event.clientY > 72 && event.clientY < vh - 64
+      if (relX >= 0.3 && relX <= 0.7 && inVerticalContentZone) {
+        toggleChrome()
+      }
+    },
+    [toggleChrome],
+  )
 
   // Keyboard shortcuts: Left / Right for page (paginated) or chapter (scroll), Esc to close TOC
   useEffect(() => {
@@ -731,7 +811,14 @@ export function ReaderView() {
     paginatedInfo.currentPage < paginatedInfo.totalPages - 1 || chapter?.next_chapter_id,
   )
 
-  const showToolbars = !isPaginated || chromeVisible || tocOpen || galleryOpen || aiDrawerOpen
+  const showToolbars =
+    chromeVisible ||
+    tocOpen ||
+    galleryOpen ||
+    aiDrawerOpen ||
+    loadingToc ||
+    Boolean(displayError) ||
+    !chapter
 
   return (
     <div
@@ -741,16 +828,20 @@ export function ReaderView() {
           : 'pb-safe min-h-[100dvh]'
       }`}
     >
-      {/* Top Toolbar (floating slide-in/out overlay in paginated mode for zero-jump fullscreen) */}
+      {/* Borderless iOS status-bar safe-area mask so scrolling text never collides with the Dynamic Island / clock */}
+      <div
+        aria-hidden="true"
+        className={`pointer-events-none fixed inset-x-0 top-0 z-20 h-[env(safe-area-inset-top,0px)] transition-colors duration-200 ${styles.page}`}
+      />
+
+      {/* Floating Top Toolbar across ALL modes (fixed + transform/opacity, zero reflow) */}
       <header
-        className={`pt-safe z-30 border-b backdrop-blur-md transition-all duration-250 ease-out ${
-          isPaginated
-            ? `fixed inset-x-0 top-0 ${
-                showToolbars
-                  ? 'translate-y-0 opacity-100'
-                  : 'pointer-events-none -translate-y-full opacity-0'
-              }`
-            : 'sticky top-0 shrink-0'
+        onPointerDown={bumpChromeActivity}
+        onClick={bumpChromeActivity}
+        className={`pt-safe fixed inset-x-0 top-0 z-30 border-b backdrop-blur-md transition-all duration-250 ease-out ${
+          showToolbars
+            ? 'translate-y-0 opacity-100'
+            : 'pointer-events-none -translate-y-full opacity-0'
         } ${styles.bar}`}
       >
         {/* Row 1: Primary navigation, title, and desktop reading controls */}
@@ -1073,6 +1164,8 @@ export function ReaderView() {
           {/* Floating Paginated Bottom Bar with iOS bottom safe-area inset */}
           {toc && chapter && (
             <footer
+              onPointerDown={bumpChromeActivity}
+              onClick={bumpChromeActivity}
               className={`pb-safe fixed inset-x-0 bottom-0 z-30 border-t backdrop-blur-md transition-all duration-250 ease-out ${
                 showToolbars
                   ? 'translate-y-0 opacity-100'
@@ -1115,101 +1208,148 @@ export function ReaderView() {
           )}
         </>
       ) : (
-        <main className="mx-auto max-w-3xl px-5 pt-8 pb-24 sm:px-10 sm:pt-12">
-          {loadingToc ? (
-            <div className="flex flex-col items-center justify-center py-32">
-              <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
-              <p className={`mt-3 text-sm ${styles.muted}`}>正在打开书籍...</p>
-            </div>
-          ) : displayError ? (
-            <div className="my-16 rounded-2xl border border-rose-300/60 bg-rose-500/10 p-8 text-center">
-              <p className="text-sm font-medium text-rose-600 dark:text-rose-400">
-                {displayError}
-              </p>
-              <Link
-                to="/"
-                className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white"
-              >
-                返回书架
-              </Link>
-            </div>
-          ) : !toc || toc.chapters.length === 0 ? (
-            <div className="my-16 text-center">
-              <p className={`text-sm ${styles.muted}`}>
-                {toc?.parse_status === 'completed'
-                  ? '这本书暂未提取到可阅读章节。'
-                  : '这本书尚未解析完成，请稍后返回书架查看。'}
-              </p>
-              <Link
-                to="/"
-                className={`mt-5 inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-medium ${styles.button}`}
-              >
-                返回书架
-              </Link>
-            </div>
-          ) : loadingChapter && !chapter ? (
-            <div className="flex flex-col items-center justify-center py-32">
-              <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
-              <p className={`mt-3 text-sm ${styles.muted}`}>正在加载章节正文...</p>
-            </div>
-          ) : chapter ? (
-            <>
-              <div className={`mb-8 border-b pb-5 ${styles.divider}`}>
-                <p className={`text-xs font-medium tracking-wider uppercase ${styles.muted}`}>
-                  Chapter {currentChapterPosition} / {toc.chapters.length}
-                  {chapter.word_count > 0 ? ` · ${chapter.word_count.toLocaleString()} 字` : ''}
-                </p>
-                <h1 className="mt-2 text-2xl font-bold leading-snug sm:text-3xl">
-                  {chapter.title}
-                </h1>
+        <>
+          <main
+            onClick={handleScrollStageClick}
+            className="mx-auto max-w-3xl px-5 pt-[calc(6.5rem+env(safe-area-inset-top))] pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-10 md:pt-[calc(5.25rem+env(safe-area-inset-top))]"
+          >
+            {loadingToc ? (
+              <div className="flex flex-col items-center justify-center py-32">
+                <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
+                <p className={`mt-3 text-sm ${styles.muted}`}>正在打开书籍...</p>
               </div>
+            ) : displayError ? (
+              <div className="my-16 rounded-2xl border border-rose-300/60 bg-rose-500/10 p-8 text-center">
+                <p className="text-sm font-medium text-rose-600 dark:text-rose-400">
+                  {displayError}
+                </p>
+                <Link
+                  to="/"
+                  className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white"
+                >
+                  返回书架
+                </Link>
+              </div>
+            ) : !toc || toc.chapters.length === 0 ? (
+              <div className="my-16 text-center">
+                <p className={`text-sm ${styles.muted}`}>
+                  {toc?.parse_status === 'completed'
+                    ? '这本书暂未提取到可阅读章节。'
+                    : '这本书尚未解析完成，请稍后返回书架查看。'}
+                </p>
+                <Link
+                  to="/"
+                  className={`mt-5 inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-medium ${styles.button}`}
+                >
+                  返回书架
+                </Link>
+              </div>
+            ) : loadingChapter && !chapter ? (
+              <div className="flex flex-col items-center justify-center py-32">
+                <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
+                <p className={`mt-3 text-sm ${styles.muted}`}>正在加载章节正文...</p>
+              </div>
+            ) : chapter ? (
+              <>
+                <div className={`mb-8 border-b pb-5 ${styles.divider}`}>
+                  <p className={`text-xs font-medium tracking-wider uppercase ${styles.muted}`}>
+                    Chapter {currentChapterPosition} / {toc.chapters.length}
+                    {chapter.word_count > 0 ? ` · ${chapter.word_count.toLocaleString()} 字` : ''}
+                  </p>
+                  <h1 className="mt-2 text-2xl font-bold leading-snug sm:text-3xl">
+                    {chapter.title}
+                  </h1>
+                </div>
 
-              <article
-                ref={articleRef}
-                onClick={handleScrollArticleClick}
-                style={{ fontSize: `${fontSize}px` }}
-                className={`ln-reader-content transition-opacity duration-150 ${
-                  loadingChapter ? 'opacity-50' : 'opacity-100'
-                }`}
-                dangerouslySetInnerHTML={{ __html: chapter.content_html }}
-              />
+                <article
+                  ref={articleRef}
+                  style={{ fontSize: `${fontSize}px` }}
+                  className={`ln-reader-content transition-opacity duration-150 ${
+                    loadingChapter ? 'opacity-50' : 'opacity-100'
+                  }`}
+                  dangerouslySetInnerHTML={{ __html: chapter.content_html }}
+                />
 
-              {/* Bottom chapter navigation */}
-              <nav
-                aria-label="章节导航"
-                className={`mt-14 flex items-center justify-between gap-3 border-t pt-8 ${styles.divider}`}
-              >
+                {/* End-of-chapter inline navigation */}
+                <nav
+                  aria-label="章节导航"
+                  className={`mt-14 flex items-center justify-between gap-3 border-t pt-8 ${styles.divider}`}
+                >
+                  <button
+                    type="button"
+                    disabled={!chapter.prev_chapter_id || loadingChapter}
+                    onClick={goPrevChapter}
+                    className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles.button}`}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    上一章
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setTocOpen(true)}
+                    className={`cursor-pointer rounded-xl border px-4 py-2.5 text-xs font-medium transition ${styles.button}`}
+                  >
+                    目录 ({currentChapterPosition}/{toc.chapters.length})
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!chapter.next_chapter_id || loadingChapter}
+                    onClick={goNextChapter}
+                    className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles.button}`}
+                  >
+                    下一章
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </nav>
+              </>
+            ) : null}
+          </main>
+
+          {/* Floating Scroll-Mode Bottom Bar (syncs smoothly with top toolbar auto-hide) */}
+          {toc && chapter && (
+            <footer
+              onPointerDown={bumpChromeActivity}
+              onClick={bumpChromeActivity}
+              className={`pb-safe fixed inset-x-0 bottom-0 z-30 border-t backdrop-blur-md transition-all duration-250 ease-out ${
+                showToolbars
+                  ? 'translate-y-0 opacity-100'
+                  : 'pointer-events-none translate-y-full opacity-0'
+              } ${styles.bar}`}
+            >
+              <div className="mx-auto flex h-12 max-w-3xl items-center justify-between gap-2 px-4 sm:px-10">
                 <button
                   type="button"
                   disabled={!chapter.prev_chapter_id || loadingChapter}
                   onClick={goPrevChapter}
-                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles.button}`}
+                  className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-35 ${styles.button}`}
                 >
-                  <ChevronLeft className="h-4 w-4" />
+                  <ChevronLeft className="h-3.5 w-3.5" />
                   上一章
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setTocOpen(true)}
-                  className={`cursor-pointer rounded-xl border px-4 py-2.5 text-xs font-medium transition ${styles.button}`}
+                  className={`cursor-pointer truncate text-xs tabular-nums transition hover:opacity-100 ${styles.muted}`}
                 >
-                  目录 ({currentChapterPosition}/{toc.chapters.length})
+                  目录 · 第 {currentChapterPosition}/{toc.chapters.length} 章
                 </button>
 
                 <button
                   type="button"
                   disabled={!chapter.next_chapter_id || loadingChapter}
                   onClick={goNextChapter}
-                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles.button}`}
+                  className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-35 ${styles.button}`}
                 >
                   下一章
-                  <ChevronRight className="h-4 w-4" />
+                  <ChevronRight className="h-3.5 w-3.5" />
                 </button>
-              </nav>
-            </>
-          ) : null}
-        </main>
+              </div>
+            </footer>
+          )}
+        </>
       )}
 
       {/* Slide-over TOC Drawer */}
