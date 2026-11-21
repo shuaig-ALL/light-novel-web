@@ -9,7 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import BOOKS_STORAGE_DIR
 from app.core.database import get_db
+from app.core.security import get_current_user
 from app.models.book import Book, Chapter
+from app.models.user import User
 from app.schemas.book import (
     BookDeleteResponse,
     BookListItem,
@@ -24,6 +26,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/books", tags=["books"])
 
 
+async def _get_owned_book(
+    book_id: int,
+    user_id: int,
+    db: AsyncSession,
+) -> Book:
+    result = await db.execute(
+        select(Book).where(Book.id == book_id, Book.user_id == user_id)
+    )
+    book = result.scalar_one_or_none()
+    if book is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到书籍 (id={book_id})。",
+        )
+    return book
+
+
 @router.post(
     "/upload",
     response_model=BookUploadResponse,
@@ -32,6 +51,7 @@ router = APIRouter(prefix="/books", tags=["books"])
 async def upload_epub(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BookUploadResponse:
     original_filename = file.filename or ""
@@ -51,6 +71,7 @@ async def upload_epub(
     fallback_title = Path(original_filename).stem.strip() or "未命名轻小说"
 
     book = Book(
+        user_id=current_user.id,
         title=fallback_title[:255],
         file_path="",
         parse_status="pending",
@@ -80,9 +101,14 @@ async def upload_epub(
 
 @router.get("", response_model=list[BookListItem])
 async def list_books(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[BookListItem]:
-    result = await db.execute(select(Book).order_by(Book.created_at.desc(), Book.id.desc()))
+    result = await db.execute(
+        select(Book)
+        .where(Book.user_id == current_user.id)
+        .order_by(Book.created_at.desc(), Book.id.desc())
+    )
     books = result.scalars().all()
     return [BookListItem.model_validate(book) for book in books]
 
@@ -90,14 +116,10 @@ async def list_books(
 @router.get("/{book_id}/toc", response_model=BookTocResponse)
 async def get_book_toc(
     book_id: int,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BookTocResponse:
-    book = await db.get(Book, book_id)
-    if book is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"未找到书籍 (id={book_id})。",
-        )
+    book = await _get_owned_book(book_id, current_user.id, db)
 
     chapter_rows = await db.execute(
         select(
@@ -106,7 +128,7 @@ async def get_book_toc(
             Chapter.title,
             Chapter.word_count,
         )
-        .where(Chapter.book_id == book_id)
+        .where(Chapter.book_id == book.id)
         .order_by(Chapter.order_index.asc())
     )
     chapters = [
@@ -135,10 +157,13 @@ async def get_book_toc(
 async def get_chapter_detail(
     book_id: int,
     chapter_id: int,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ChapterDetailResponse:
+    book = await _get_owned_book(book_id, current_user.id, db)
+
     result = await db.execute(
-        select(Chapter).where(Chapter.book_id == book_id, Chapter.id == chapter_id)
+        select(Chapter).where(Chapter.book_id == book.id, Chapter.id == chapter_id)
     )
     chapter = result.scalar_one_or_none()
     if chapter is None:
@@ -150,7 +175,7 @@ async def get_chapter_detail(
     prev_result = await db.execute(
         select(Chapter.id)
         .where(
-            Chapter.book_id == book_id,
+            Chapter.book_id == book.id,
             Chapter.order_index < chapter.order_index,
         )
         .order_by(Chapter.order_index.desc())
@@ -159,7 +184,7 @@ async def get_chapter_detail(
     next_result = await db.execute(
         select(Chapter.id)
         .where(
-            Chapter.book_id == book_id,
+            Chapter.book_id == book.id,
             Chapter.order_index > chapter.order_index,
         )
         .order_by(Chapter.order_index.asc())
@@ -181,14 +206,10 @@ async def get_chapter_detail(
 @router.delete("/{book_id}", response_model=BookDeleteResponse)
 async def delete_book(
     book_id: int,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BookDeleteResponse:
-    book = await db.get(Book, book_id)
-    if book is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"未找到书籍 (id={book_id})。",
-        )
+    book = await _get_owned_book(book_id, current_user.id, db)
 
     book_title = book.title
     await db.delete(book)

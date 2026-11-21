@@ -1,12 +1,14 @@
-import { BookOpen, Loader2, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { BookOpen, Loader2, LogOut, RefreshCw, Trash2, Upload, User, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deleteBook, getBooks, uploadBook, type BookListItem } from '../api/books'
 import { getApiErrorMessage } from '../api/client'
 import { BookShelf } from '../components/BookShelf'
+import { useAuth } from '../context/useAuth'
 
 export function HomeShelf() {
   const navigate = useNavigate()
+  const { user, logout } = useAuth()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const [books, setBooks] = useState<BookListItem[]>([])
@@ -137,6 +139,11 @@ export function HomeShelf() {
     navigate(`/read/${book.id}`)
   }
 
+  const handleLogout = () => {
+    logout()
+    navigate('/login', { replace: true })
+  }
+
   const handleConfirmDelete = async () => {
     if (!bookToDelete || deleting) {
       return
@@ -223,6 +230,26 @@ export function HomeShelf() {
                   导入 EPUB
                 </>
               )}
+            </button>
+
+            <div className="mx-0.5 hidden h-5 w-px bg-zinc-200 sm:block" />
+
+            {user && (
+              <div className="hidden items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs font-medium text-zinc-700 sm:inline-flex">
+                <User className="h-3.5 w-3.5 text-zinc-500" strokeWidth={1.75} />
+                <span className="max-w-[110px] truncate">{user.username}</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              title="退出登录"
+              aria-label="退出登录"
+              className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-900"
+            >
+              <LogOut className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <span className="hidden md:inline">退出</span>
             </button>
           </div>
         </div>

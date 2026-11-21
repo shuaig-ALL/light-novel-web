@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.api.v1.auth import router as auth_router
 from app.api.v1.books import router as books_router
 from app.core.config import BOOKS_STORAGE_DIR, STATIC_URL_PREFIX, STORAGE_DIR
 from app.core.database import engine, init_db
@@ -21,7 +22,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="Light Novel Library API",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -37,6 +38,7 @@ app.add_middleware(
 )
 
 app.mount(STATIC_URL_PREFIX, StaticFiles(directory=str(STORAGE_DIR)), name="static")
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(books_router, prefix="/api/v1")
 
 

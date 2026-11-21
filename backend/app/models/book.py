@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -6,11 +7,19 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.config import DEFAULT_SPINE_COLOR
 from app.core.database import Base
 
+if TYPE_CHECKING:
+    from app.models.user import User
+
 
 class Book(Base):
     __tablename__ = "books"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     author: Mapped[str | None] = mapped_column(String(255), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -36,6 +45,7 @@ class Book(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
+    owner: Mapped["User"] = relationship(back_populates="books")
     chapters: Mapped[list["Chapter"]] = relationship(
         back_populates="book",
         cascade="all, delete-orphan",
