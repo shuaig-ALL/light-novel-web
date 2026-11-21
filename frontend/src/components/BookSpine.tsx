@@ -1,5 +1,5 @@
 import { AlertCircle, BookOpen, Loader2, Trash2 } from 'lucide-react'
-import { useRef, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
+import { useEffect, useRef, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
 import type { BookListItem } from '../api/books'
 
 interface BookSpineProps {
@@ -21,7 +21,23 @@ export function BookSpine({
   const isFailed = book.parse_status === 'failed'
   const isReadable = book.parse_status === 'completed'
 
+  const rootRef = useRef<HTMLDivElement | null>(null)
   const lastPointerTypeRef = useRef<string>('mouse')
+
+  // On narrow touch shelves, keep the expanded cover cleanly scrolled inside the row viewport
+  useEffect(() => {
+    if (!isExpanded || !rootRef.current) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      rootRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        inline: 'nearest',
+        block: 'nearest',
+      })
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [isExpanded])
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     lastPointerTypeRef.current = event.pointerType || 'mouse'
@@ -67,6 +83,7 @@ export function BookSpine({
 
   return (
     <div
+      ref={rootRef}
       role="button"
       tabIndex={0}
       data-book-spine="true"

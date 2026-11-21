@@ -1,4 +1,5 @@
 import { BookMarked, Upload } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BookListItem } from '../api/books'
 import { BookSpine } from './BookSpine'
 
@@ -11,12 +12,32 @@ interface BookShelfProps {
   onRequestUpload: () => void
 }
 
-const BOOKS_PER_SHELF = 14
+const COLLAPSED_SLOT_PX = 56 // 54px spine slot + 2px gap
+const EXPAND_EXTRA_PX = 162  // 216px expanded - 54px collapsed
+const MAX_BOOKS_PER_ROW = 14
+
+function computeBooksPerRow(containerWidth: number): number {
+  if (containerWidth <= 0) {
+    return 5
+  }
+  // On mobile portrait (<640px), wrap cleanly so collapsed rows never overflow horizontally
+  if (containerWidth < 640) {
+    // Reserve ~44px for left/right shelf padding + rightmost angled cover peek
+    return Math.max(3, Math.floor((containerWidth - 44) / COLLAPSED_SLOT_PX))
+  }
+  // On tablet & desktop (>=640px), reserve room for 1 expanded book so hovering parts neighbors cleanly
+  const usable = containerWidth - 80 - EXPAND_EXTRA_PX
+  return Math.min(
+    MAX_BOOKS_PER_ROW,
+    Math.max(5, Math.floor(usable / COLLAPSED_SLOT_PX) + 1),
+  )
+}
 
 function chunkBooks(books: BookListItem[], size: number): BookListItem[][] {
+  const safeSize = Math.max(1, size)
   const rows: BookListItem[][] = []
-  for (let i = 0; i < books.length; i += size) {
-    rows.push(books.slice(i, i + size))
+  for (let i = 0; i < books.length; i += safeSize) {
+    rows.push(books.slice(i, i + safeSize))
   }
   return rows
 }
@@ -29,9 +50,44 @@ export function BookShelf({
   onDeleteBook,
   onRequestUpload,
 }: BookShelfProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [booksPerRow, setBooksPerRow] = useState<number>(() =>
+    typeof window !== 'undefined'
+      ? computeBooksPerRow(Math.min(window.innerWidth - 32, 1088))
+      : 6,
+  )
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) {
+      return
+    }
+
+    const updateCapacity = () => {
+      const nextWidth = Math.floor(el.getBoundingClientRect().width)
+      if (nextWidth > 0) {
+        setBooksPerRow(computeBooksPerRow(nextWidth))
+      }
+    }
+
+    const rafId = window.requestAnimationFrame(updateCapacity)
+    const observer = new ResizeObserver(updateCapacity)
+    observer.observe(el)
+
+    return () => {
+      window.cancelAnimationFrame(rafId)
+      observer.disconnect()
+    }
+  }, [books.length])
+
+  const shelfRows = useMemo(
+    () => chunkBooks(books, booksPerRow),
+    [books, booksPerRow],
+  )
+
   if (books.length === 0) {
     return (
-      <div className="mx-auto mt-10 max-w-2xl">
+      <div ref={containerRef} className="mx-auto mt-10 max-w-2xl">
         <div className="rounded-2xl border border-dashed border-zinc-200 bg-white px-6 py-14 text-center sm:px-8 sm:py-16">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-900">
             <BookMarked className="h-5 w-5" strokeWidth={1.75} />
@@ -58,14 +114,12 @@ export function BookShelf({
     )
   }
 
-  const shelfRows = chunkBooks(books, BOOKS_PER_SHELF)
-
   return (
-    <div className="space-y-12 sm:space-y-14">
+    <div ref={containerRef} className="space-y-10 sm:space-y-14">
       {shelfRows.map((row, rowIndex) => (
         <section key={rowIndex} aria-label={`书架第 ${rowIndex + 1} 层`}>
-          {/* Single non-wrapping shelf row: tightly stacked by default, smoothly parts neighbors */}
-          <div className="overflow-x-auto pt-8 pr-16 pb-1 pl-4 sm:pr-20 sm:pl-10">
+          {/* Responsive multi-row shelf: overflows gently only if a touch-expanded book needs momentary glide */}
+          <div className="overflow-x-auto pt-7 pr-8 pb-1 pl-3 sm:pt-8 sm:pr-16 sm:pl-8">
             <div className="flex w-max flex-nowrap items-end gap-0.5">
               {row.map((book) => (
                 <BookSpine

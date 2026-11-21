@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -67,6 +68,89 @@ function percentToPage(percent: number, total: number): number {
   return Math.min(total - 1, Math.max(0, Math.round((clamped / 100) * (total - 1))))
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
+ * Normalize standalone illustration blocks in EPUB chapter HTML into dedicated
+ * full-page `.ln-paginated-plate` containers so iOS Safari never slices an image
+ * across two columns or packs two half-images onto one page.
+ */
+function preparePaginatedHtml(
+  rawHtml: string,
+  headerInfo?: { position: number; totalChapters: number; wordCount: number; title: string } | null,
+): string {
+  let processed = rawHtml
+  if (rawHtml && /<(img|svg)\b/i.test(rawHtml)) {
+    try {
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(rawHtml, 'text/html')
+      const body = doc.body
+
+      const wrapMediaIntoPlates = (container: Element, mediaNodes: Element[]) => {
+        const parent = container.parentNode
+        if (!parent) return
+        const frag = doc.createDocumentFragment()
+        for (const media of mediaNodes) {
+          const plate = doc.createElement('div')
+          plate.className = 'ln-paginated-plate'
+          plate.appendChild(media.cloneNode(true))
+          frag.appendChild(plate)
+        }
+        parent.replaceChild(frag, container)
+      }
+
+      const candidates = Array.from(body.querySelectorAll('figure, div, p'))
+      for (const el of candidates) {
+        if (!el.isConnected) continue
+        const mediaNodes = Array.from(el.querySelectorAll('img, svg'))
+        if (mediaNodes.length === 0) continue
+
+        const textContent = (el.textContent || '').replace(/[\s\u3000\u00a0]+/g, '')
+        if (textContent.length === 0) {
+          wrapMediaIntoPlates(el, mediaNodes)
+        }
+      }
+
+      for (const child of Array.from(body.children)) {
+        const tag = child.tagName.toLowerCase()
+        if (tag === 'img' || tag === 'svg') {
+          const plate = doc.createElement('div')
+          plate.className = 'ln-paginated-plate'
+          child.replaceWith(plate)
+          plate.appendChild(child)
+        }
+      }
+
+      processed = body.innerHTML
+    } catch {
+      processed = rawHtml
+    }
+  }
+
+  if (!headerInfo) {
+    return processed
+  }
+
+  const wordsBadge =
+    headerInfo.wordCount > 0 ? ` · ${headerInfo.wordCount.toLocaleString()} 字` : ''
+  const headerHtml =
+    `<header class="mb-5 border-b border-current/15 pb-3" style="break-after:avoid;-webkit-column-break-after:avoid">` +
+    `<p style="text-indent:0;margin-bottom:0" class="text-xs font-medium tracking-wider uppercase opacity-55">` +
+    `Chapter ${headerInfo.position} / ${headerInfo.totalChapters}${wordsBadge}` +
+    `</p>` +
+    `<h1 class="mt-1.5 text-xl font-bold leading-snug sm:text-2xl">${escapeHtml(headerInfo.title)}</h1>` +
+    `</header>`
+
+  return headerHtml + processed
+}
+
 export const PaginatedChapterView = forwardRef<
   PaginatedChapterHandle,
   PaginatedChapterViewProps
@@ -116,6 +200,31 @@ export const PaginatedChapterView = forwardRef<
   const flipTimerRef = useRef<number | null>(null)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const lastSwipeAtRef = useRef<number>(0)
+
+  // Pure illustration frontispiece chapters (0 text words) skip the large header block
+  // so every color plate opens cleanly without a blank heading-only page before it.
+  const paginatedHtml = useMemo(
+    () =>
+      preparePaginatedHtml(
+        chapter.content_html,
+        chapter.word_count > 0
+          ? {
+              position: chapterPosition ?? chapter.order_index,
+              totalChapters,
+              wordCount: chapter.word_count,
+              title: chapter.title,
+            }
+          : null,
+      ),
+    [
+      chapter.content_html,
+      chapter.word_count,
+      chapter.order_index,
+      chapter.title,
+      chapterPosition,
+      totalChapters,
+    ],
+  )
 
   // Reset desired target when chapter or landing changes
   useEffect(() => {
@@ -202,12 +311,13 @@ export const PaginatedChapterView = forwardRef<
     })
 
     const imgNodes = Array.from(trackRef.current?.querySelectorAll('img') ?? [])
-    const handleImageLoad = () => {
+    const handleImageSettled = () => {
       window.requestAnimationFrame(measurePages)
     }
     for (const img of imgNodes) {
       if (!img.complete) {
-        img.addEventListener('load', handleImageLoad, { once: true })
+        img.addEventListener('load', handleImageSettled, { once: true })
+        img.addEventListener('error', handleImageSettled, { once: true })
       }
     }
 
@@ -215,10 +325,11 @@ export const PaginatedChapterView = forwardRef<
       window.cancelAnimationFrame(raf1)
       window.cancelAnimationFrame(raf2)
       for (const img of imgNodes) {
-        img.removeEventListener('load', handleImageLoad)
+        img.removeEventListener('load', handleImageSettled)
+        img.removeEventListener('error', handleImageSettled)
       }
     }
-  }, [chapter.id, chapter.content_html, frameSize.width, frameSize.height, fontSize, onPageStateChange])
+  }, [chapter.id, paginatedHtml, frameSize.width, frameSize.height, fontSize, onPageStateChange])
 
   useEffect(() => {
     return () => {
@@ -319,7 +430,6 @@ export const PaginatedChapterView = forwardRef<
     const absX = Math.abs(dx)
     const absY = Math.abs(dy)
 
-    // Require clear horizontal intent so minor vertical thumb motion never turns pages
     if (absX >= SWIPE_THRESHOLD_PX && absX > absY * SWIPE_HORIZONTAL_RATIO) {
       lastSwipeAtRef.current = Date.now()
       if (dx < 0) {
@@ -335,7 +445,6 @@ export const PaginatedChapterView = forwardRef<
   }
 
   const handleFrameClick = (event: MouseEvent<HTMLDivElement>) => {
-    // Suppress synthetic click immediately following a horizontal swipe
     if (Date.now() - lastSwipeAtRef.current < 350) {
       return
     }
@@ -379,7 +488,7 @@ export const PaginatedChapterView = forwardRef<
   }
 
   const stride = frameSize.width + COLUMN_GAP
-  const translateX = currentPage * stride
+  const translateX = Math.round(currentPage * stride)
 
   const trackStyle: CSSProperties =
     frameSize.width > 0 && frameSize.height > 0
@@ -390,11 +499,13 @@ export const PaginatedChapterView = forwardRef<
           columnGap: `${COLUMN_GAP}px`,
           fontSize: `${fontSize}px`,
           transform: `translate3d(-${translateX}px, 0, 0)`,
+          WebkitTransform: `translate3d(-${translateX}px, 0, 0)`,
           transition:
             mode === 'slide'
               ? 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1)'
               : 'none',
-          '--ln-page-img-max-h': `${Math.max(180, frameSize.height - 48)}px`,
+          '--ln-page-h': `${frameSize.height}px`,
+          '--ln-page-img-max-h': `${Math.max(160, frameSize.height - 24)}px`,
         } as CSSProperties)
       : { fontSize: `${fontSize}px`, opacity: 0 }
 
@@ -407,24 +518,13 @@ export const PaginatedChapterView = forwardRef<
       onTouchCancel={handleTouchCancel}
       className="ln-flip-stage ln-paginated-viewport relative h-full w-full overflow-hidden select-text"
     >
-      {/* Multi-column paginated chapter flow */}
+      {/* Multi-column paginated chapter flow (direct children for strict WebKit column breaks) */}
       <div
         ref={trackRef}
         style={trackStyle}
-        className="ln-reader-content ln-reader-paginated will-change-transform"
-      >
-        <div className="mb-5 border-b border-current/15 pb-3" style={{ breakAfter: 'avoid' }}>
-          <p className="text-xs font-medium tracking-wider uppercase opacity-55">
-            Chapter {chapterPosition ?? chapter.order_index} / {totalChapters}
-            {chapter.word_count > 0 ? ` · ${chapter.word_count.toLocaleString()} 字` : ''}
-          </p>
-          <h1 className="mt-1.5 text-xl font-bold leading-snug sm:text-2xl">
-            {chapter.title}
-          </h1>
-        </div>
-
-        <div dangerouslySetInnerHTML={{ __html: chapter.content_html }} />
-      </div>
+        className="ln-reader-content ln-reader-paginated"
+        dangerouslySetInnerHTML={{ __html: paginatedHtml }}
+      />
 
       {/* 3D Paper-flip leaf & dynamic shadow overlay (flip mode only) */}
       {mode === 'flip' && flipAnim && (

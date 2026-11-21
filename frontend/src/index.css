@@ -238,8 +238,10 @@
   transition: transform 200ms ease, box-shadow 200ms ease;
 }
 
-.ln-reader-content img:hover {
-  transform: scale(1.005);
+@media (hover: hover) and (pointer: fine) {
+  .ln-reader-content:not(.ln-reader-paginated) img:hover {
+    transform: scale(1.005);
+  }
 }
 
 /* Multi-column paginated reader layout (slide & flip modes) */
@@ -250,6 +252,8 @@
 
 .ln-reader-paginated {
   column-fill: auto;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 
 .ln-reader-paginated p {
@@ -261,24 +265,99 @@
 .ln-reader-paginated h2,
 .ln-reader-paginated h3 {
   break-after: avoid;
+  -webkit-column-break-after: avoid;
 }
 
-.ln-reader-paginated img {
-  margin: 0.75rem auto;
-  max-height: var(--ln-page-img-max-h, 62vh);
+/* Standalone full-page illustration plate: strictly 1 image per page, never clipped or split */
+.ln-reader-paginated .ln-paginated-plate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: calc(var(--ln-page-h, 70vh) - 2px);
+  max-height: calc(var(--ln-page-h, 70vh) - 2px);
+  margin: 0;
+  padding: 6px 0;
+  box-sizing: border-box;
+  overflow: hidden;
   break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+  break-before: column;
+  -webkit-column-break-before: always;
+  break-after: column;
+  -webkit-column-break-after: always;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
 }
 
+/* Avoid empty leading/trailing blank columns on first/last plates */
+.ln-reader-paginated > .ln-paginated-plate:first-child {
+  break-before: auto;
+  -webkit-column-break-before: auto;
+}
+
+.ln-reader-paginated > .ln-paginated-plate:last-child {
+  break-after: auto;
+  -webkit-column-break-after: auto;
+}
+
+.ln-reader-paginated .ln-paginated-plate img,
+.ln-reader-paginated .ln-paginated-plate svg {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 0.375rem;
+  transition: none;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+
+/* Fallback guard for any inline images inside mixed text paragraphs */
+.ln-reader-paginated img,
+.ln-reader-paginated svg {
+  display: block;
+  margin: 0.5rem auto;
+  max-width: 100%;
+  max-height: var(--ln-page-img-max-h, 62vh);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  transition: none;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+
+.ln-reader-paginated figure,
 .ln-reader-paginated .ln-illustration,
 .ln-reader-paginated p:has(img) {
   break-inside: avoid;
-  margin: 0.75rem auto;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+  margin: 0.5rem auto;
 }
 
 /* 3D paper-flip transition animations for flip reading mode */
 .ln-flip-stage {
   perspective: 1800px;
   overscroll-behavior: none;
+  isolation: isolate;
+  contain: layout paint;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
 }
 
 @keyframes lnFlipLeafForward {
