@@ -6,7 +6,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import BOOKS_STORAGE_DIR
@@ -112,12 +112,66 @@ async def list_books(
     db: AsyncSession = Depends(get_db),
 ) -> list[BookListItem]:
     result = await db.execute(
-        select(Book)
+        select(
+            Book,
+            ReadingProgress.scroll_percent,
+            ReadingProgress.updated_at.label("last_read_at"),
+            Chapter.title.label("last_chapter_title"),
+            Chapter.order_index.label("last_chapter_order_index"),
+        )
+        .outerjoin(
+            ReadingProgress,
+            and_(
+                ReadingProgress.book_id == Book.id,
+                ReadingProgress.user_id == current_user.id,
+            ),
+        )
+        .outerjoin(Chapter, Chapter.id == ReadingProgress.chapter_id)
         .where(Book.user_id == current_user.id)
         .order_by(Book.created_at.desc(), Book.id.desc())
     )
-    books = result.scalars().all()
-    return [BookListItem.model_validate(book) for book in books]
+
+    items: list[BookListItem] = []
+    for row in result.all():
+        book: Book = row[0]
+        scroll_percent = row.scroll_percent
+        last_read_at = row.last_read_at
+        last_chapter_title = row.last_chapter_title
+        last_chapter_order_index = row.last_chapter_order_index
+
+        progress_percent: float | None = None
+        if last_read_at is not None and last_chapter_order_index is not None:
+            total = max(1, book.total_chapters)
+            clamped_order = min(total, max(1, int(last_chapter_order_index)))
+            clamped_scroll = min(100.0, max(0.0, float(scroll_percent or 0.0)))
+            progress_percent = round(
+                min(
+                    100.0,
+                    max(0.0, (((clamped_order - 1) + clamped_scroll / 100.0) / total) * 100.0),
+                ),
+                1,
+            )
+
+        items.append(
+            BookListItem(
+                id=book.id,
+                title=book.title,
+                author=book.author,
+                description=book.description,
+                cover_url=book.cover_url,
+                spine_color=book.spine_color,
+                parse_status=book.parse_status,
+                parse_error=book.parse_error,
+                total_chapters=book.total_chapters,
+                last_chapter_title=last_chapter_title if last_read_at is not None else None,
+                progress_percent=progress_percent,
+                last_read_at=last_read_at,
+                created_at=book.created_at,
+                updated_at=book.updated_at,
+            )
+        )
+
+    return items
 
 
 @router.get("/{book_id}/toc", response_model=BookTocResponse)

@@ -24,6 +24,9 @@ class BookListItem(BaseModel):
     parse_status: str
     parse_error: str | None = None
     total_chapters: int
+    last_chapter_title: str | None = None
+    progress_percent: float | None = None
+    last_read_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

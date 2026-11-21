@@ -131,14 +131,38 @@ export function BookSpine({ book, onSelect, onRequestDelete }: BookSpineProps) {
             <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
           </button>
 
-          {/* Hover info overlay: title, author, chapter count */}
-          <div className="absolute inset-x-0 bottom-0 translate-y-1 bg-gradient-to-t from-zinc-950/92 via-zinc-950/78 to-transparent px-3 pt-10 pb-3 text-white opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100">
+          {/* Hover info overlay: title, author, reading progress & chapter count */}
+          <div className="absolute inset-x-0 bottom-0 translate-y-1 bg-gradient-to-t from-zinc-950/95 via-zinc-950/84 to-transparent px-3 pt-11 pb-3 text-white opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100">
             <h3 className="line-clamp-2 text-xs font-semibold leading-snug tracking-tight">
               {book.title}
             </h3>
             <p className="mt-0.5 truncate text-[11px] text-zinc-300">
               {book.author || '未知作者'}
             </p>
+
+            {isReadable && (
+              <div className="mt-2">
+                {book.progress_percent !== null ? (
+                  <>
+                    <p className="truncate text-[10px] text-zinc-200">
+                      已读 {Math.round(book.progress_percent)}%
+                      {book.last_chapter_title ? ` · ${book.last_chapter_title}` : ''}
+                    </p>
+                    <div className="mt-1 h-[2px] w-full overflow-hidden rounded-full bg-white/20">
+                      <div
+                        className="h-full rounded-full bg-white transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.max(2, book.progress_percent))}%`,
+                        }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-[10px] text-zinc-400">未开始阅读</p>
+                )}
+              </div>
+            )}
+
             <div className="mt-2 flex items-center justify-between text-[10px]">
               {isReadable ? (
                 <>

@@ -19,6 +19,9 @@ export interface BookListItem {
   parse_status: ParseStatus
   parse_error: string | null
   total_chapters: number
+  last_chapter_title: string | null
+  progress_percent: number | null
+  last_read_at: string | null
   created_at: string
   updated_at: string
 }

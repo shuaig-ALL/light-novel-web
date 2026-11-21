@@ -1,26 +1,69 @@
-import { BookOpen, Loader2, LogOut, RefreshCw, Settings, Trash2, Upload, User, X } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  BookOpen,
+  Loader2,
+  LogOut,
+  RefreshCw,
+  Search,
+  Settings,
+  Trash2,
+  Upload,
+  User,
+  X,
+} from 'lucide-react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+} from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deleteBook, getBooks, uploadBook, type BookListItem } from '../api/books'
 import { getApiErrorMessage } from '../api/client'
 import { BookShelf } from '../components/BookShelf'
 import { useAuth } from '../context/useAuth'
 
+type ShelfSortKey = 'recent_read' | 'recent_upload' | 'title'
+
+const SORT_OPTIONS: { key: ShelfSortKey; label: string }[] = [
+  { key: 'recent_read', label: '最近阅读' },
+  { key: 'recent_upload', label: '最近上传' },
+  { key: 'title', label: '书名' },
+]
+
+function parseTimestamp(iso: string | null): number {
+  if (!iso) return 0
+  const parsed = Date.parse(iso)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 export function HomeShelf() {
   const navigate = useNavigate()
   const { user, updatePreferences, logout } = useAuth()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const dragCounterRef = useRef(0)
 
   const [books, setBooks] = useState<BookListItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadState, setUploadState] = useState<{
+    current: number
+    total: number
+    percent: number
+  } | null>(null)
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
+
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortBy, setSortBy] = useState<ShelfSortKey>('recent_read')
+
   const [bookToDelete, setBookToDelete] = useState<BookListItem | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [savingPrefs, setSavingPrefs] = useState(false)
   const [prefsError, setPrefsError] = useState<string | null>(null)
   const [notice, setNotice] = useState<{ type: 'info' | 'error'; text: string } | null>(null)
+
+  const uploading = uploadState !== null
 
   const refreshBooks = useCallback(async (showSpinner = false) => {
     if (showSpinner) {
@@ -104,6 +147,35 @@ export function HomeShelf() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [bookToDelete, deleting, settingsOpen])
 
+  const filteredAndSortedBooks = useMemo(() => {
+    const keyword = searchQuery.trim().toLowerCase()
+    const matched = keyword
+      ? books.filter((book) => {
+          const titleMatch = book.title.toLowerCase().includes(keyword)
+          const authorMatch = (book.author || '').toLowerCase().includes(keyword)
+          return titleMatch || authorMatch
+        })
+      : books
+
+    return [...matched].sort((a, b) => {
+      if (sortBy === 'title') {
+        return a.title.localeCompare(b.title, 'zh-CN')
+      }
+      if (sortBy === 'recent_upload') {
+        const diff = parseTimestamp(b.created_at) - parseTimestamp(a.created_at)
+        return diff !== 0 ? diff : b.id - a.id
+      }
+      // recent_read: books with reading records first (newest read first), then unread by upload time
+      const readA = parseTimestamp(a.last_read_at)
+      const readB = parseTimestamp(b.last_read_at)
+      if (readA !== readB) {
+        return readB - readA
+      }
+      const createdDiff = parseTimestamp(b.created_at) - parseTimestamp(a.created_at)
+      return createdDiff !== 0 ? createdDiff : b.id - a.id
+    })
+  }, [books, searchQuery, sortBy])
+
   const handleTogglePreference = async (
     key: 'enable_gallery' | 'hide_unread_illustrations',
     nextValue: boolean,
@@ -123,37 +195,113 @@ export function HomeShelf() {
     fileInputRef.current?.click()
   }
 
+  const handleUploadFiles = useCallback(
+    async (incomingFiles: FileList | File[]) => {
+      const files = Array.from(incomingFiles)
+      if (files.length === 0) {
+        return
+      }
+
+      const validEpubs = files.filter((file) =>
+        file.name.toLowerCase().endsWith('.epub'),
+      )
+      const skippedCount = files.length - validEpubs.length
+
+      if (validEpubs.length === 0) {
+        setNotice({ type: 'error', text: '仅支持导入 .epub 格式的轻小说文件。' })
+        return
+      }
+
+      setNotice(null)
+      const uploadedTitles: string[] = []
+      const failedNames: string[] = []
+
+      for (let i = 0; i < validEpubs.length; i += 1) {
+        const file = validEpubs[i]
+        setUploadState({ current: i + 1, total: validEpubs.length, percent: 0 })
+        try {
+          const res = await uploadBook(file, (percent) => {
+            setUploadState({ current: i + 1, total: validEpubs.length, percent })
+          })
+          uploadedTitles.push(res.title)
+        } catch {
+          failedNames.push(file.name)
+        }
+      }
+
+      setUploadState(null)
+
+      if (uploadedTitles.length > 0) {
+        await refreshBooks(false)
+        const baseText =
+          uploadedTitles.length === 1
+            ? `《${uploadedTitles[0]}》已加入书架，正在后台解析封面与章节...`
+            : `已批量导入 ${uploadedTitles.length} 本轻小说，正在后台依次解析...`
+        const extras: string[] = []
+        if (skippedCount > 0) extras.push(`已跳过 ${skippedCount} 个非 EPUB 文件`)
+        if (failedNames.length > 0) extras.push(`${failedNames.length} 本上传失败`)
+        setNotice({
+          type: failedNames.length > 0 ? 'error' : 'info',
+          text: extras.length > 0 ? `${baseText}（${extras.join('，')}）` : baseText,
+        })
+      } else {
+        setNotice({
+          type: 'error',
+          text: `上传失败（${failedNames.join('、')}），请检查文件后重试。`,
+        })
+      }
+    },
+    [refreshBooks],
+  )
+
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+    const selectedFiles = event.target.files
+    if (!selectedFiles || selectedFiles.length === 0) {
+      return
+    }
+    const copy = Array.from(selectedFiles)
     event.target.value = ''
-    if (!file) {
+    await handleUploadFiles(copy)
+  }
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) {
       return
     }
+    event.preventDefault()
+    dragCounterRef.current += 1
+    setIsDraggingFiles(true)
+  }
 
-    if (!file.name.toLowerCase().endsWith('.epub')) {
-      setNotice({ type: 'error', text: '仅支持上传 .epub 格式的轻小说文件。' })
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) {
       return
     }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
 
-    setUploading(true)
-    setUploadProgress(0)
-    setNotice(null)
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) {
+      return
+    }
+    event.preventDefault()
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1)
+    if (dragCounterRef.current === 0) {
+      setIsDraggingFiles(false)
+    }
+  }
 
-    try {
-      const res = await uploadBook(file, (percent) => setUploadProgress(percent))
-      setNotice({
-        type: 'info',
-        text: `《${res.title}》已加入书架，正在后台解析封面与章节...`,
-      })
-      await refreshBooks(false)
-    } catch (error) {
-      setNotice({
-        type: 'error',
-        text: getApiErrorMessage(error, '上传失败，请检查文件后重试'),
-      })
-    } finally {
-      setUploading(false)
-      setUploadProgress(0)
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    dragCounterRef.current = 0
+    setIsDraggingFiles(false)
+    if (uploading) {
+      return
+    }
+    const droppedFiles = event.dataTransfer.files
+    if (droppedFiles && droppedFiles.length > 0) {
+      void handleUploadFiles(droppedFiles)
     }
   }
 
@@ -190,13 +338,26 @@ export function HomeShelf() {
     }
   }
 
+  const uploadButtonLabel = uploadState
+    ? uploadState.total > 1
+      ? `上传中 ${uploadState.current}/${uploadState.total} (${uploadState.percent}%)`
+      : `上传中 ${uploadState.percent}%`
+    : '导入 EPUB'
+
   return (
-    <div className="min-h-screen bg-white text-zinc-900">
-      {/* Hidden file input */}
+    <div
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className="min-h-screen bg-white text-zinc-900"
+    >
+      {/* Hidden file input (supports multi-file batch selection) */}
       <input
         ref={fileInputRef}
         type="file"
         accept=".epub,application/epub+zip"
+        multiple
         className="hidden"
         onChange={(e) => void handleFileChange(e)}
       />
@@ -232,7 +393,10 @@ export function HomeShelf() {
               title="刷新书架"
               className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-900"
             >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} strokeWidth={1.75} />
+              <RefreshCw
+                className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
+                strokeWidth={1.75}
+              />
             </button>
 
             <button
@@ -242,16 +406,11 @@ export function HomeShelf() {
               className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {uploading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  上传中 {uploadProgress}%
-                </>
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <>
-                  <Upload className="h-4 w-4" strokeWidth={1.75} />
-                  导入 EPUB
-                </>
+                <Upload className="h-4 w-4" strokeWidth={1.75} />
               )}
+              <span>{uploadButtonLabel}</span>
             </button>
 
             <div className="mx-0.5 hidden h-5 w-px bg-zinc-200 sm:block" />
@@ -312,14 +471,73 @@ export function HomeShelf() {
           </div>
         )}
 
-        <div className="mb-4 flex items-baseline justify-between px-1">
-          <p className="text-xs font-medium tracking-wider text-zinc-400 uppercase">
-            My Bookshelf
-          </p>
-          {books.length > 0 && (
-            <p className="text-xs text-zinc-400">
-              悬停书本转正预览 · 点击进入沉浸式阅读
+        {/* Shelf toolbar: title + minimalist search & sort controls */}
+        <div className="mb-6 flex flex-col gap-3 px-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-medium tracking-wider text-zinc-400 uppercase">
+              My Bookshelf
             </p>
+            {books.length > 0 && (
+              <p className="mt-0.5 text-xs text-zinc-400">
+                悬停书本转正预览 · 支持直接拖入本地 .epub 文件
+              </p>
+            )}
+          </div>
+
+          {books.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Minimalist search box */}
+              <div className="relative w-full sm:w-56">
+                <Search
+                  className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400"
+                  strokeWidth={1.75}
+                />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="搜索书名或作者..."
+                  aria-label="搜索书名或作者"
+                  className="w-full rounded-lg border border-zinc-200 bg-white py-1.5 pr-8 pl-8 text-xs text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    aria-label="清空搜索"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute top-1/2 right-2 -translate-y-1/2 cursor-pointer rounded p-0.5 text-zinc-400 transition hover:text-zinc-900"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Minimalist sort switcher */}
+              <div
+                role="group"
+                aria-label="书架排序方式"
+                className="inline-flex items-center rounded-lg border border-zinc-200 bg-zinc-50 p-0.5"
+              >
+                {SORT_OPTIONS.map(({ key, label }) => {
+                  const active = sortBy === key
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setSortBy(key)}
+                      className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                        active
+                          ? 'bg-white text-zinc-900 shadow-xs'
+                          : 'text-zinc-500 hover:text-zinc-800'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           )}
         </div>
 
@@ -328,15 +546,52 @@ export function HomeShelf() {
             <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
             <p className="mt-3 text-sm">正在加载私人书架...</p>
           </div>
+        ) : books.length > 0 && filteredAndSortedBooks.length === 0 ? (
+          <div className="mx-auto mt-10 max-w-md rounded-2xl border border-dashed border-zinc-200 bg-white px-6 py-12 text-center">
+            <Search className="mx-auto h-6 w-6 text-zinc-300" strokeWidth={1.75} />
+            <p className="mt-3 text-sm font-medium text-zinc-800">
+              未找到与「{searchQuery.trim()}」匹配的轻小说
+            </p>
+            <p className="mt-1 text-xs text-zinc-400">
+              试试更换关键词，或清空搜索查看全部藏书
+            </p>
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="mt-5 cursor-pointer rounded-lg border border-zinc-200 bg-white px-4 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
+            >
+              清空搜索
+            </button>
+          </div>
         ) : (
           <BookShelf
-            books={books}
+            books={filteredAndSortedBooks}
             onSelectBook={handleSelectBook}
             onDeleteBook={setBookToDelete}
             onRequestUpload={triggerFilePicker}
           />
         )}
       </main>
+
+      {/* Fullscreen drag-and-drop EPUB upload overlay */}
+      {isDraggingFiles && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-white/88 p-6 backdrop-blur-xs sm:p-10"
+        >
+          <div className="flex h-full w-full flex-col items-center justify-center rounded-3xl border-2 border-dashed border-zinc-300 bg-white/75 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50 text-zinc-900 shadow-xs">
+              <Upload className="h-6 w-6" strokeWidth={1.75} />
+            </div>
+            <p className="mt-5 text-lg font-semibold tracking-tight text-zinc-900">
+              松开即可导入轻小说
+            </p>
+            <p className="mt-1.5 text-xs text-zinc-400">
+              支持一次拖入多本本地 .epub 文件，自动加入私人书架并解析
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Minimalist preferences modal */}
       {settingsOpen && user && (
