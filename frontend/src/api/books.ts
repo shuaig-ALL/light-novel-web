@@ -52,6 +52,12 @@ export interface ChapterDetailResponse {
   next_chapter_id: number | null
 }
 
+export interface BookDeleteResponse {
+  id: number
+  title: string
+  message: string
+}
+
 export async function uploadBook(
   file: File,
   onProgress?: (percent: number) => void,
@@ -87,5 +93,10 @@ export async function getChapterDetail(
   const { data } = await apiClient.get<ChapterDetailResponse>(
     `/books/${bookId}/chapters/${chapterId}`,
   )
+  return data
+}
+
+export async function deleteBook(bookId: number): Promise<BookDeleteResponse> {
+  const { data } = await apiClient.delete<BookDeleteResponse>(`/books/${bookId}`)
   return data
 }

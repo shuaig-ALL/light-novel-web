@@ -59,3 +59,9 @@ class ChapterDetailResponse(BaseModel):
     word_count: int
     prev_chapter_id: int | None = None
     next_chapter_id: int | None = None
+
+
+class BookDeleteResponse(BaseModel):
+    id: int
+    title: str
+    message: str

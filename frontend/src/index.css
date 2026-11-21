@@ -21,7 +21,8 @@
 }
 
 .group:hover .book-3d,
-.group:focus-visible .book-3d {
+.group:focus-visible .book-3d,
+.group:focus-within .book-3d {
   transform: translateX(28px) rotateY(0deg) translateY(-10px);
 }
 

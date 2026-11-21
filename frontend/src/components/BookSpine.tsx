@@ -1,23 +1,44 @@
-import { AlertCircle, BookOpen, Loader2 } from 'lucide-react'
+import { AlertCircle, BookOpen, Loader2, Trash2 } from 'lucide-react'
 import type { BookListItem } from '../api/books'
 
 interface BookSpineProps {
   book: BookListItem
   onSelect: (book: BookListItem) => void
+  onRequestDelete: (book: BookListItem) => void
 }
 
-export function BookSpine({ book, onSelect }: BookSpineProps) {
+export function BookSpine({ book, onSelect, onRequestDelete }: BookSpineProps) {
   const isParsing = book.parse_status === 'pending' || book.parse_status === 'processing'
   const isFailed = book.parse_status === 'failed'
   const isReadable = book.parse_status === 'completed'
 
+  const handleOpen = () => {
+    if (isReadable) {
+      onSelect(book)
+    }
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isReadable && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault()
+      onSelect(book)
+    }
+  }
+
+  const handleDeleteClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onRequestDelete(book)
+  }
+
   return (
-    <button
-      type="button"
-      onClick={() => isReadable && onSelect(book)}
-      disabled={!isReadable}
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={book.title}
       title={book.title}
-      className={`book-stage group relative z-0 flex w-[54px] shrink-0 flex-col items-start pt-2 pb-0 text-left transition-all duration-300 ease-out hover:z-20 hover:w-[216px] focus-visible:z-20 focus-visible:w-[216px] focus-visible:outline-none ${
+      onClick={handleOpen}
+      onKeyDown={handleKeyDown}
+      className={`book-stage group relative z-0 flex w-[54px] shrink-0 flex-col items-start pt-2 pb-0 text-left transition-all duration-300 ease-out hover:z-20 hover:w-[216px] focus-visible:z-20 focus-visible:w-[216px] focus-within:z-20 focus-within:w-[216px] focus-visible:outline-none ${
         isReadable ? 'cursor-pointer' : 'cursor-default'
       }`}
     >
@@ -81,9 +102,9 @@ export function BookSpine({ book, onSelect }: BookSpineProps) {
           {/* Subtle binding hinge shading along the left edge of the cover */}
           <div className="absolute inset-y-0 left-0 w-3 bg-gradient-to-r from-black/10 to-transparent" />
 
-          {/* Status badge when parsing or failed */}
+          {/* Status badge when parsing or failed (top-left, clear of delete button) */}
           {(isParsing || isFailed) && (
-            <div className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 rounded-full bg-zinc-900/80 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-xs">
+            <div className="absolute top-2.5 left-2.5 inline-flex items-center gap-1 rounded-full bg-zinc-900/80 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-xs">
               {isParsing ? (
                 <>
                   <Loader2 className="h-2.5 w-2.5 animate-spin" />
@@ -98,8 +119,20 @@ export function BookSpine({ book, onSelect }: BookSpineProps) {
             </div>
           )}
 
+          {/* Minimalist translucent delete button (visible only on hover / focus) */}
+          <button
+            type="button"
+            aria-label={`删除《${book.title}》`}
+            title="删除书籍"
+            onClick={handleDeleteClick}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="pointer-events-none absolute top-2 right-2 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-zinc-900/50 text-white/90 opacity-0 backdrop-blur-xs transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:bg-zinc-900/85 hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          >
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+          </button>
+
           {/* Hover info overlay: title, author, chapter count */}
-          <div className="absolute inset-x-0 bottom-0 translate-y-1 bg-gradient-to-t from-zinc-950/92 via-zinc-950/78 to-transparent px-3 pt-10 pb-3 text-white opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
+          <div className="absolute inset-x-0 bottom-0 translate-y-1 bg-gradient-to-t from-zinc-950/92 via-zinc-950/78 to-transparent px-3 pt-10 pb-3 text-white opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100">
             <h3 className="line-clamp-2 text-xs font-semibold leading-snug tracking-tight">
               {book.title}
             </h3>
@@ -141,8 +174,8 @@ export function BookSpine({ book, onSelect }: BookSpineProps) {
       {/* Soft contact shadow that widens and deepens when the book turns forward */}
       <div
         aria-hidden="true"
-        className="pointer-events-none -mt-1 ml-1 h-[7px] w-[48px] -skew-x-[24deg] rounded-full bg-zinc-900/12 blur-[4px] transition-all duration-300 ease-out group-hover:ml-7 group-hover:w-[156px] group-hover:skew-x-0 group-hover:bg-zinc-900/24 group-hover:blur-[8px] group-focus-visible:ml-7 group-focus-visible:w-[156px] group-focus-visible:skew-x-0 group-focus-visible:bg-zinc-900/24 group-focus-visible:blur-[8px]"
+        className="pointer-events-none -mt-1 ml-1 h-[7px] w-[48px] -skew-x-[24deg] rounded-full bg-zinc-900/12 blur-[4px] transition-all duration-300 ease-out group-hover:ml-7 group-hover:w-[156px] group-hover:skew-x-0 group-hover:bg-zinc-900/24 group-hover:blur-[8px] group-focus-within:ml-7 group-focus-within:w-[156px] group-focus-within:skew-x-0 group-focus-within:bg-zinc-900/24 group-focus-within:blur-[8px]"
       />
-    </button>
+    </div>
   )
 }

@@ -5,6 +5,7 @@ import { BookSpine } from './BookSpine'
 interface BookShelfProps {
   books: BookListItem[]
   onSelectBook: (book: BookListItem) => void
+  onDeleteBook: (book: BookListItem) => void
   onRequestUpload: () => void
 }
 
@@ -18,7 +19,12 @@ function chunkBooks(books: BookListItem[], size: number): BookListItem[][] {
   return rows
 }
 
-export function BookShelf({ books, onSelectBook, onRequestUpload }: BookShelfProps) {
+export function BookShelf({
+  books,
+  onSelectBook,
+  onDeleteBook,
+  onRequestUpload,
+}: BookShelfProps) {
   if (books.length === 0) {
     return (
       <div className="mx-auto mt-10 max-w-2xl">
@@ -62,6 +68,7 @@ export function BookShelf({ books, onSelectBook, onRequestUpload }: BookShelfPro
                   key={book.id}
                   book={book}
                   onSelect={onSelectBook}
+                  onRequestDelete={onDeleteBook}
                 />
               ))}
             </div>

@@ -1,7 +1,7 @@
-import { BookOpen, Loader2, RefreshCw, Upload, X } from 'lucide-react'
+import { BookOpen, Loader2, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getBooks, uploadBook, type BookListItem } from '../api/books'
+import { deleteBook, getBooks, uploadBook, type BookListItem } from '../api/books'
 import { getApiErrorMessage } from '../api/client'
 import { BookShelf } from '../components/BookShelf'
 
@@ -13,6 +13,8 @@ export function HomeShelf() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [bookToDelete, setBookToDelete] = useState<BookListItem | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [notice, setNotice] = useState<{ type: 'info' | 'error'; text: string } | null>(null)
 
   const refreshBooks = useCallback(async (showSpinner = false) => {
@@ -79,6 +81,20 @@ export function HomeShelf() {
     return () => window.clearInterval(timer)
   }, [hasPendingBooks, refreshBooks])
 
+  // Close delete confirmation modal with Escape
+  useEffect(() => {
+    if (!bookToDelete) {
+      return
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !deleting) {
+        setBookToDelete(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [bookToDelete, deleting])
+
   const triggerFilePicker = () => {
     fileInputRef.current?.click()
   }
@@ -119,6 +135,30 @@ export function HomeShelf() {
 
   const handleSelectBook = (book: BookListItem) => {
     navigate(`/read/${book.id}`)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!bookToDelete || deleting) {
+      return
+    }
+    const target = bookToDelete
+    setDeleting(true)
+    setNotice(null)
+
+    try {
+      await deleteBook(target.id)
+      localStorage.removeItem(`ln_last_chapter_${target.id}`)
+      setBookToDelete(null)
+      setNotice({ type: 'info', text: `已从书架移除《${target.title}》。` })
+      await refreshBooks(false)
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        text: getApiErrorMessage(error, '删除失败，请稍后重试'),
+      })
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -230,10 +270,69 @@ export function HomeShelf() {
           <BookShelf
             books={books}
             onSelectBook={handleSelectBook}
+            onDeleteBook={setBookToDelete}
             onRequestUpload={triggerFilePicker}
           />
         )}
       </main>
+
+      {/* Minimalist delete confirmation modal */}
+      {bookToDelete && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-book-dialog-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        >
+          <div
+            className="fixed inset-0 bg-zinc-950/35 backdrop-blur-[2px]"
+            onClick={() => !deleting && setBookToDelete(null)}
+          />
+
+          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-900">
+                <Trash2 className="h-4.5 w-4.5" strokeWidth={1.75} />
+              </div>
+              <div className="min-w-0">
+                <h2
+                  id="delete-book-dialog-title"
+                  className="text-base font-semibold text-zinc-900"
+                >
+                  确认删除书籍？
+                </h2>
+                <p className="mt-1.5 text-sm leading-relaxed text-zinc-500">
+                  即将永久删除
+                  <span className="font-medium text-zinc-900">
+                    《{bookToDelete.title}》
+                  </span>
+                  ，包括数据库章节记录与本地 EPUB、封面及插画文件，此操作无法撤销。
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setBookToDelete(null)}
+                className="cursor-pointer rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => void handleConfirmDelete()}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {deleting ? '删除中...' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

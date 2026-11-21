@@ -1,3 +1,6 @@
+import asyncio
+import logging
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
@@ -8,6 +11,7 @@ from app.core.config import BOOKS_STORAGE_DIR
 from app.core.database import get_db
 from app.models.book import Book, Chapter
 from app.schemas.book import (
+    BookDeleteResponse,
     BookListItem,
     BookTocResponse,
     BookUploadResponse,
@@ -16,6 +20,7 @@ from app.schemas.book import (
 )
 from app.services.epub_parser import parse_epub_book
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/books", tags=["books"])
 
 
@@ -170,4 +175,40 @@ async def get_chapter_detail(
         word_count=chapter.word_count,
         prev_chapter_id=prev_result.scalar_one_or_none(),
         next_chapter_id=next_result.scalar_one_or_none(),
+    )
+
+
+@router.delete("/{book_id}", response_model=BookDeleteResponse)
+async def delete_book(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> BookDeleteResponse:
+    book = await db.get(Book, book_id)
+    if book is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到书籍 (id={book_id})。",
+        )
+
+    book_title = book.title
+    await db.delete(book)
+    await db.commit()
+
+    books_root = BOOKS_STORAGE_DIR.resolve()
+    target_dir = (books_root / str(book_id)).resolve()
+    if target_dir.parent == books_root and target_dir.exists() and target_dir.is_dir():
+        try:
+            await asyncio.to_thread(shutil.rmtree, target_dir)
+        except OSError as exc:
+            logger.warning(
+                "Deleted book %s from DB, but failed to clean directory %s: %s",
+                book_id,
+                target_dir,
+                exc,
+            )
+
+    return BookDeleteResponse(
+        id=book_id,
+        title=book_title,
+        message="书籍及相关本地文件已删除。",
     )
