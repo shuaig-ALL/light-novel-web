@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class BookUploadResponse(BaseModel):
@@ -65,3 +65,17 @@ class BookDeleteResponse(BaseModel):
     id: int
     title: str
     message: str
+
+
+class ReadingProgressUpdate(BaseModel):
+    chapter_id: int = Field(..., gt=0)
+    scroll_percent: float = Field(default=0.0, ge=0.0, le=100.0)
+
+
+class ReadingProgressResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    book_id: int
+    chapter_id: int
+    scroll_percent: float
+    updated_at: datetime

@@ -16,10 +16,12 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   getBookToc,
   getChapterDetail,
+  getReadingProgress,
+  updateReadingProgress,
   type BookTocResponse,
   type ChapterDetailResponse,
 } from '../api/books'
-import { getApiErrorMessage } from '../api/client'
+import { getApiErrorMessage, getStoredToken } from '../api/client'
 
 type ReaderTheme = 'light' | 'sepia' | 'dark'
 
@@ -89,6 +91,45 @@ function readInitialFontSize(): number {
   return 18
 }
 
+function computeScrollPercent(): number {
+  const scrollingEl = document.scrollingElement || document.documentElement
+  const maxScrollable = scrollingEl.scrollHeight - window.innerHeight
+  if (maxScrollable <= 0) {
+    return 0
+  }
+  const scrollTop = window.scrollY || scrollingEl.scrollTop || 0
+  const raw = (scrollTop / maxScrollable) * 100
+  return Math.round(Math.min(100, Math.max(0, raw)) * 10) / 10
+}
+
+function sendProgressKeepalive(
+  bookId: number,
+  chapterId: number,
+  scrollPercent: number,
+): void {
+  const token = getStoredToken()
+  if (!token) {
+    return
+  }
+  const normalized = Math.round(Math.min(100, Math.max(0, scrollPercent)) * 10) / 10
+  void fetch(`/api/v1/books/${bookId}/progress`, {
+    method: 'PUT',
+    keepalive: true,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      chapter_id: chapterId,
+      scroll_percent: normalized,
+    }),
+  }).catch(() => {
+    // Ignore unload network interruptions
+  })
+}
+
+const SCROLL_SYNC_DEBOUNCE_MS = 1500
+
 export function ReaderView() {
   const { bookId: bookIdParam } = useParams<{ bookId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -98,6 +139,13 @@ export function ReaderView() {
   const initialChapterQueryRef = useRef<number | null>(
     Number(searchParams.get('chapter')) || null,
   )
+  const articleRef = useRef<HTMLElement | null>(null)
+  const pendingScrollRestoreRef = useRef<{ chapterId: number; percent: number } | null>(null)
+  const shouldScrollTopOnNextChapterRef = useRef<boolean>(false)
+  const suppressScrollSyncUntilRef = useRef<number>(0)
+  const scrollDebounceTimerRef = useRef<number | null>(null)
+  const dirtyScrollRef = useRef<{ chapterId: number; scrollPercent: number } | null>(null)
+  const lastSyncedRef = useRef<{ chapterId: number; scrollPercent: number } | null>(null)
 
   const [toc, setToc] = useState<BookTocResponse | null>(null)
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
@@ -120,6 +168,34 @@ export function ReaderView() {
   )
   const displayError = isInvalidBookId ? '无效的书籍 ID。' : errorMsg
 
+  const syncProgressToCloud = useCallback(
+    (targetChapterId: number, scrollPercent: number, force = false) => {
+      if (isInvalidBookId) {
+        return
+      }
+      const normalized = Math.round(Math.min(100, Math.max(0, scrollPercent)) * 10) / 10
+      const prev = lastSyncedRef.current
+      if (
+        !force &&
+        prev &&
+        prev.chapterId === targetChapterId &&
+        Math.abs(prev.scrollPercent - normalized) < 0.5
+      ) {
+        dirtyScrollRef.current = null
+        return
+      }
+      lastSyncedRef.current = { chapterId: targetChapterId, scrollPercent: normalized }
+      dirtyScrollRef.current = null
+      void updateReadingProgress(bookId, {
+        chapter_id: targetChapterId,
+        scroll_percent: normalized,
+      }).catch(() => {
+        // Silent background sync; keep reading uninterrupted
+      })
+    },
+    [bookId, isInvalidBookId],
+  )
+
   useEffect(() => {
     localStorage.setItem(THEME_STORAGE_KEY, theme)
   }, [theme])
@@ -128,7 +204,7 @@ export function ReaderView() {
     localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(fontSize))
   }, [fontSize])
 
-  // Load book TOC once per bookId
+  // Load book TOC and cloud reading progress in parallel once per bookId
   useEffect(() => {
     if (isInvalidBookId) {
       return
@@ -136,29 +212,53 @@ export function ReaderView() {
 
     let cancelled = false
 
-    void getBookToc(bookId)
-      .then((data) => {
+    void Promise.all([
+      getBookToc(bookId),
+      getReadingProgress(bookId).catch(() => null),
+    ])
+      .then(([tocData, cloudProgress]) => {
         if (cancelled) return
         setErrorMsg(null)
-        setToc(data)
+        setToc(tocData)
         setLoadedBookId(bookId)
 
-        if (data.chapters.length === 0) {
+        if (tocData.chapters.length === 0) {
           setActiveChapterId(null)
           return
         }
 
-        const validIds = new Set(data.chapters.map((c) => c.id))
+        const validIds = new Set(tocData.chapters.map((c) => c.id))
         const savedChapterId = Number(localStorage.getItem(`ln_last_chapter_${bookId}`)) || null
         const queryChapterId = initialChapterQueryRef.current
+        const cloudChapterId =
+          cloudProgress && validIds.has(cloudProgress.chapter_id)
+            ? cloudProgress.chapter_id
+            : null
 
+        let resolvedChapterId = tocData.chapters[0].id
         if (queryChapterId && validIds.has(queryChapterId)) {
-          setActiveChapterId(queryChapterId)
+          resolvedChapterId = queryChapterId
+        } else if (cloudChapterId) {
+          resolvedChapterId = cloudChapterId
         } else if (savedChapterId && validIds.has(savedChapterId)) {
-          setActiveChapterId(savedChapterId)
-        } else {
-          setActiveChapterId(data.chapters[0].id)
+          resolvedChapterId = savedChapterId
         }
+
+        shouldScrollTopOnNextChapterRef.current = false
+        if (cloudProgress && cloudChapterId === resolvedChapterId) {
+          lastSyncedRef.current = {
+            chapterId: cloudProgress.chapter_id,
+            scrollPercent: cloudProgress.scroll_percent,
+          }
+          if (cloudProgress.scroll_percent > 0) {
+            pendingScrollRestoreRef.current = {
+              chapterId: cloudProgress.chapter_id,
+              percent: cloudProgress.scroll_percent,
+            }
+          }
+        }
+
+        setActiveChapterId(resolvedChapterId)
       })
       .catch((error) => {
         if (!cancelled) {
@@ -186,7 +286,6 @@ export function ReaderView() {
         setErrorMsg(null)
         setChapter(data)
         localStorage.setItem(`ln_last_chapter_${bookId}`, String(data.id))
-        window.scrollTo({ top: 0, behavior: 'smooth' })
       })
       .catch((error) => {
         if (!cancelled) {
@@ -199,13 +298,176 @@ export function ReaderView() {
     }
   }, [bookId, isInvalidBookId, activeChapterId])
 
+  // StrictMode-safe scroll restoration after chapter DOM mounts (and after illustrations load)
+  useEffect(() => {
+    if (!chapter) {
+      return
+    }
+
+    const pending = pendingScrollRestoreRef.current
+    if (pending && pending.chapterId === chapter.id) {
+      let userInterrupted = false
+      let cancelled = false
+      let raf1 = 0
+      let raf2 = 0
+      let settleTimer = 0
+      const targetPercent = pending.percent
+
+      const markInterrupted = () => {
+        userInterrupted = true
+        pendingScrollRestoreRef.current = null
+      }
+
+      const applyRestore = () => {
+        if (cancelled || userInterrupted) {
+          return
+        }
+        const scrollingEl = document.scrollingElement || document.documentElement
+        const maxScrollable = scrollingEl.scrollHeight - window.innerHeight
+        if (maxScrollable > 0) {
+          suppressScrollSyncUntilRef.current = Date.now() + 800
+          window.scrollTo({
+            top: (maxScrollable * targetPercent) / 100,
+            behavior: 'auto',
+          })
+        }
+      }
+
+      // Suppress scroll sync while waiting for layout & images to settle
+      suppressScrollSyncUntilRef.current = Date.now() + 1200
+
+      // Double requestAnimationFrame guarantees DOM paint of content_html before measuring scrollHeight
+      raf1 = window.requestAnimationFrame(() => {
+        raf2 = window.requestAnimationFrame(() => {
+          applyRestore()
+          settleTimer = window.setTimeout(() => {
+            if (!cancelled) {
+              applyRestore()
+              pendingScrollRestoreRef.current = null
+            }
+          }, 260)
+        })
+      })
+
+      // Re-calibrate if illustrations inside the chapter finish loading after initial paint
+      const imgNodes = Array.from(articleRef.current?.querySelectorAll('img') ?? [])
+      const handleImageLoad = () => {
+        applyRestore()
+      }
+      for (const img of imgNodes) {
+        if (!img.complete) {
+          img.addEventListener('load', handleImageLoad, { once: true })
+        }
+      }
+
+      window.addEventListener('wheel', markInterrupted, { passive: true, once: true })
+      window.addEventListener('touchstart', markInterrupted, { passive: true, once: true })
+      window.addEventListener('pointerdown', markInterrupted, { passive: true, once: true })
+
+      return () => {
+        cancelled = true
+        window.cancelAnimationFrame(raf1)
+        window.cancelAnimationFrame(raf2)
+        window.clearTimeout(settleTimer)
+        for (const img of imgNodes) {
+          img.removeEventListener('load', handleImageLoad)
+        }
+        window.removeEventListener('wheel', markInterrupted)
+        window.removeEventListener('touchstart', markInterrupted)
+        window.removeEventListener('pointerdown', markInterrupted)
+      }
+    }
+
+    // Only scroll back to top on explicit chapter switches (never clobbering initial restore)
+    if (shouldScrollTopOnNextChapterRef.current) {
+      shouldScrollTopOnNextChapterRef.current = false
+      suppressScrollSyncUntilRef.current = Date.now() + 700
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }, [chapter])
+
+  // Debounced silent scroll progress sync (1.5s) + flush on page hide / unmount
+  useEffect(() => {
+    if (isInvalidBookId || !activeChapterId || !chapter || chapter.id !== activeChapterId) {
+      return
+    }
+
+    const flushPendingWithKeepalive = () => {
+      if (scrollDebounceTimerRef.current !== null) {
+        window.clearTimeout(scrollDebounceTimerRef.current)
+        scrollDebounceTimerRef.current = null
+      }
+      const pendingDirty = dirtyScrollRef.current
+      if (!pendingDirty || pendingDirty.chapterId !== activeChapterId) {
+        return
+      }
+      const prev = lastSyncedRef.current
+      if (
+        prev &&
+        prev.chapterId === pendingDirty.chapterId &&
+        Math.abs(prev.scrollPercent - pendingDirty.scrollPercent) < 0.5
+      ) {
+        dirtyScrollRef.current = null
+        return
+      }
+      lastSyncedRef.current = pendingDirty
+      dirtyScrollRef.current = null
+      sendProgressKeepalive(bookId, pendingDirty.chapterId, pendingDirty.scrollPercent)
+    }
+
+    const handleScroll = () => {
+      if (Date.now() < suppressScrollSyncUntilRef.current) {
+        return
+      }
+      const currentPercent = computeScrollPercent()
+      dirtyScrollRef.current = {
+        chapterId: activeChapterId,
+        scrollPercent: currentPercent,
+      }
+      if (scrollDebounceTimerRef.current !== null) {
+        window.clearTimeout(scrollDebounceTimerRef.current)
+      }
+      scrollDebounceTimerRef.current = window.setTimeout(() => {
+        scrollDebounceTimerRef.current = null
+        syncProgressToCloud(activeChapterId, computeScrollPercent())
+      }, SCROLL_SYNC_DEBOUNCE_MS)
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushPendingWithKeepalive()
+      }
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    window.addEventListener('pagehide', flushPendingWithKeepalive)
+    window.addEventListener('beforeunload', flushPendingWithKeepalive)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('pagehide', flushPendingWithKeepalive)
+      window.removeEventListener('beforeunload', flushPendingWithKeepalive)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      flushPendingWithKeepalive()
+    }
+  }, [bookId, isInvalidBookId, activeChapterId, chapter, syncProgressToCloud])
+
   const selectChapter = useCallback(
     (targetId: number) => {
+      if (scrollDebounceTimerRef.current !== null) {
+        window.clearTimeout(scrollDebounceTimerRef.current)
+        scrollDebounceTimerRef.current = null
+      }
+      dirtyScrollRef.current = null
+      pendingScrollRestoreRef.current = null
+      shouldScrollTopOnNextChapterRef.current = true
       setActiveChapterId(targetId)
       setSearchParams({ chapter: String(targetId) }, { replace: true })
       setTocOpen(false)
+      syncProgressToCloud(targetId, 0, true)
     },
-    [setSearchParams],
+    [setSearchParams, syncProgressToCloud],
   )
 
   const goPrev = useCallback(() => {
@@ -415,6 +677,7 @@ export function ReaderView() {
             </div>
 
             <article
+              ref={articleRef}
               style={{ fontSize: `${fontSize}px` }}
               className={`ln-reader-content transition-opacity duration-150 ${
                 loadingChapter ? 'opacity-50' : 'opacity-100'

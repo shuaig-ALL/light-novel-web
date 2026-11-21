@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
@@ -11,6 +12,7 @@ from app.core.config import BOOKS_STORAGE_DIR
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.book import Book, Chapter
+from app.models.reading_progress import ReadingProgress
 from app.models.user import User
 from app.schemas.book import (
     BookDeleteResponse,
@@ -19,6 +21,8 @@ from app.schemas.book import (
     BookUploadResponse,
     ChapterDetailResponse,
     ChapterTocItem,
+    ReadingProgressResponse,
+    ReadingProgressUpdate,
 )
 from app.services.epub_parser import parse_epub_book
 
@@ -233,3 +237,72 @@ async def delete_book(
         title=book_title,
         message="书籍及相关本地文件已删除。",
     )
+
+
+@router.get("/{book_id}/progress", response_model=ReadingProgressResponse | None)
+async def get_reading_progress(
+    book_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReadingProgressResponse | None:
+    book = await _get_owned_book(book_id, current_user.id, db)
+
+    result = await db.execute(
+        select(ReadingProgress).where(
+            ReadingProgress.user_id == current_user.id,
+            ReadingProgress.book_id == book.id,
+        )
+    )
+    progress = result.scalar_one_or_none()
+    if progress is None:
+        return None
+    return ReadingProgressResponse.model_validate(progress)
+
+
+@router.put("/{book_id}/progress", response_model=ReadingProgressResponse)
+async def update_reading_progress(
+    book_id: int,
+    payload: ReadingProgressUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReadingProgressResponse:
+    book = await _get_owned_book(book_id, current_user.id, db)
+
+    chapter_check = await db.execute(
+        select(Chapter.id).where(
+            Chapter.id == payload.chapter_id,
+            Chapter.book_id == book.id,
+        )
+    )
+    if chapter_check.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到章节 (book_id={book_id}, chapter_id={payload.chapter_id})。",
+        )
+
+    normalized_percent = round(min(100.0, max(0.0, float(payload.scroll_percent))), 2)
+
+    result = await db.execute(
+        select(ReadingProgress).where(
+            ReadingProgress.user_id == current_user.id,
+            ReadingProgress.book_id == book.id,
+        )
+    )
+    progress = result.scalar_one_or_none()
+
+    if progress is None:
+        progress = ReadingProgress(
+            user_id=current_user.id,
+            book_id=book.id,
+            chapter_id=payload.chapter_id,
+            scroll_percent=normalized_percent,
+        )
+        db.add(progress)
+    else:
+        progress.chapter_id = payload.chapter_id
+        progress.scroll_percent = normalized_percent
+        progress.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(progress)
+    return ReadingProgressResponse.model_validate(progress)

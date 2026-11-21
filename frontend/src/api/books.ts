@@ -58,6 +58,18 @@ export interface BookDeleteResponse {
   message: string
 }
 
+export interface ReadingProgress {
+  book_id: number
+  chapter_id: number
+  scroll_percent: number
+  updated_at: string
+}
+
+export interface ReadingProgressUpdatePayload {
+  chapter_id: number
+  scroll_percent: number
+}
+
 export async function uploadBook(
   file: File,
   onProgress?: (percent: number) => void,
@@ -98,5 +110,25 @@ export async function getChapterDetail(
 
 export async function deleteBook(bookId: number): Promise<BookDeleteResponse> {
   const { data } = await apiClient.delete<BookDeleteResponse>(`/books/${bookId}`)
+  return data
+}
+
+export async function getReadingProgress(
+  bookId: number,
+): Promise<ReadingProgress | null> {
+  const { data } = await apiClient.get<ReadingProgress | null>(
+    `/books/${bookId}/progress`,
+  )
+  return data
+}
+
+export async function updateReadingProgress(
+  bookId: number,
+  payload: ReadingProgressUpdatePayload,
+): Promise<ReadingProgress> {
+  const { data } = await apiClient.put<ReadingProgress>(
+    `/books/${bookId}/progress`,
+    payload,
+  )
   return data
 }

@@ -41,6 +41,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     # Ensure all ORM models are registered on Base.metadata before creating tables.
     import app.models.book  # noqa: F401
+    import app.models.reading_progress  # noqa: F401
     import app.models.user  # noqa: F401
 
     async with engine.begin() as conn:
