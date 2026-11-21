@@ -1,11 +1,14 @@
 import { apiClient } from './client'
 
+export type ReadingMode = 'scroll' | 'slide' | 'flip'
+
 export interface UserInfo {
   id: number
   username: string
   email: string
   enable_gallery: boolean
   hide_unread_illustrations: boolean
+  reading_mode: ReadingMode
   created_at: string
 }
 
@@ -29,6 +32,7 @@ export interface LoginPayload {
 export interface UserPreferencesPayload {
   enable_gallery?: boolean
   hide_unread_illustrations?: boolean
+  reading_mode?: ReadingMode
 }
 
 export async function registerUser(payload: RegisterPayload): Promise<TokenResponse> {

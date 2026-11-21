@@ -106,6 +106,102 @@
   max-height: 82vh;
   object-fit: contain;
   border-radius: 0.5rem;
+  cursor: zoom-in;
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+
+.ln-reader-content img:hover {
+  transform: scale(1.005);
+}
+
+/* Multi-column paginated reader layout (slide & flip modes) */
+.ln-reader-paginated {
+  column-fill: auto;
+}
+
+.ln-reader-paginated p {
+  orphans: 2;
+  widows: 2;
+}
+
+.ln-reader-paginated h1,
+.ln-reader-paginated h2,
+.ln-reader-paginated h3 {
+  break-after: avoid;
+}
+
+.ln-reader-paginated img {
+  margin: 0.75rem auto;
+  max-height: var(--ln-page-img-max-h, 62vh);
+  break-inside: avoid;
+}
+
+.ln-reader-paginated .ln-illustration,
+.ln-reader-paginated p:has(img) {
+  break-inside: avoid;
+  margin: 0.75rem auto;
+}
+
+/* 3D paper-flip transition animations for flip reading mode */
+.ln-flip-stage {
+  perspective: 1800px;
+}
+
+@keyframes lnFlipLeafForward {
+  0% {
+    transform: rotateY(0deg);
+    opacity: 0.96;
+    box-shadow: -8px 0 28px rgba(0, 0, 0, 0.22);
+  }
+  55% {
+    opacity: 0.92;
+    box-shadow: -28px 0 46px rgba(0, 0, 0, 0.3);
+  }
+  100% {
+    transform: rotateY(-102deg);
+    opacity: 0;
+    box-shadow: -2px 0 10px rgba(0, 0, 0, 0.04);
+  }
+}
+
+@keyframes lnFlipLeafBackward {
+  0% {
+    transform: rotateY(-98deg);
+    opacity: 0.15;
+    box-shadow: 24px 0 42px rgba(0, 0, 0, 0.26);
+  }
+  45% {
+    opacity: 0.94;
+    box-shadow: 18px 0 36px rgba(0, 0, 0, 0.22);
+  }
+  100% {
+    transform: rotateY(0deg);
+    opacity: 0;
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+
+@keyframes lnFlipShadowSweep {
+  0% {
+    opacity: 0.32;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.ln-flip-leaf-next {
+  transform-origin: left center;
+  animation: lnFlipLeafForward 420ms cubic-bezier(0.22, 0.85, 0.32, 1) forwards;
+}
+
+.ln-flip-leaf-prev {
+  transform-origin: left center;
+  animation: lnFlipLeafBackward 420ms cubic-bezier(0.22, 0.85, 0.32, 1) forwards;
+}
+
+.ln-flip-shadow-sweep {
+  animation: lnFlipShadowSweep 420ms ease-out forwards;
 }
 
 .ln-reader-content blockquote {

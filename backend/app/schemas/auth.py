@@ -1,6 +1,9 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+ReadingMode = Literal["scroll", "slide", "flip"]
 
 
 class UserRegisterRequest(BaseModel):
@@ -17,6 +20,7 @@ class UserLoginRequest(BaseModel):
 class UserPreferencesUpdate(BaseModel):
     enable_gallery: bool | None = None
     hide_unread_illustrations: bool | None = None
+    reading_mode: ReadingMode | None = None
 
 
 class UserResponse(BaseModel):
@@ -27,6 +31,7 @@ class UserResponse(BaseModel):
     email: EmailStr
     enable_gallery: bool = False
     hide_unread_illustrations: bool = True
+    reading_mode: ReadingMode = "scroll"
     created_at: datetime
 
 

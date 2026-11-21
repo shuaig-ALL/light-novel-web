@@ -23,6 +23,9 @@ class User(Base):
     hide_unread_illustrations: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="1"
     )
+    reading_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="scroll", server_default="scroll"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -1,19 +1,30 @@
 import {
   ArrowLeft,
+  BookOpen,
   BookOpenText,
   ChevronLeft,
   ChevronRight,
+  Columns2,
   Images,
   List,
   Loader2,
   Minus,
   Moon,
   Plus,
+  ScrollText,
   Sun,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+} from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
+import type { ReadingMode } from '../api/auth'
 import {
   getBookToc,
   getChapterDetail,
@@ -24,6 +35,12 @@ import {
 } from '../api/books'
 import { getApiErrorMessage, getStoredToken } from '../api/client'
 import { IllustrationGalleryModal } from '../components/IllustrationGalleryModal'
+import { InlineImageLightbox } from '../components/InlineImageLightbox'
+import {
+  PaginatedChapterView,
+  type PaginatedChapterHandle,
+  type PaginatedLanding,
+} from '../components/PaginatedChapterView'
 import { useAuth } from '../context/useAuth'
 
 type ReaderTheme = 'light' | 'sepia' | 'dark'
@@ -77,6 +94,17 @@ const THEME_STYLES: Record<
     divider: 'border-stone-800',
   },
 }
+
+const READING_MODE_OPTIONS: {
+  key: ReadingMode
+  label: string
+  title: string
+  icon: typeof ScrollText
+}[] = [
+  { key: 'scroll', label: '滚动', title: '纵向滚动阅读', icon: ScrollText },
+  { key: 'slide', label: '平移', title: '横向平移分页', icon: Columns2 },
+  { key: 'flip', label: '翻页', title: '仿真 3D 翻页', icon: BookOpen },
+]
 
 function readInitialTheme(): ReaderTheme {
   const saved = localStorage.getItem(THEME_STORAGE_KEY)
@@ -132,22 +160,28 @@ function sendProgressKeepalive(
 }
 
 const SCROLL_SYNC_DEBOUNCE_MS = 1500
+const PAGE_SYNC_DEBOUNCE_MS = 450
 
 export function ReaderView() {
-  const { user } = useAuth()
+  const { user, updatePreferences } = useAuth()
   const { bookId: bookIdParam } = useParams<{ bookId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const bookId = Number(bookIdParam)
   const isInvalidBookId = !Number.isFinite(bookId) || bookId <= 0
+  const readingMode: ReadingMode = user?.reading_mode ?? 'scroll'
+  const isPaginated = readingMode === 'slide' || readingMode === 'flip'
+
   const initialChapterQueryRef = useRef<number | null>(
     Number(searchParams.get('chapter')) || null,
   )
   const articleRef = useRef<HTMLElement | null>(null)
+  const paginatedRef = useRef<PaginatedChapterHandle | null>(null)
   const pendingScrollRestoreRef = useRef<{ chapterId: number; percent: number } | null>(null)
   const shouldScrollTopOnNextChapterRef = useRef<boolean>(false)
   const suppressScrollSyncUntilRef = useRef<number>(0)
   const scrollDebounceTimerRef = useRef<number | null>(null)
+  const pageSyncTimerRef = useRef<number | null>(null)
   const dirtyScrollRef = useRef<{ chapterId: number; scrollPercent: number } | null>(null)
   const lastSyncedRef = useRef<{ chapterId: number; scrollPercent: number } | null>(null)
 
@@ -160,6 +194,19 @@ export function ReaderView() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [tocOpen, setTocOpen] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  const [inlineLightbox, setInlineLightbox] = useState<{
+    src: string
+    alt: string | null
+  } | null>(null)
+
+  const [paginatedLanding, setPaginatedLanding] = useState<PaginatedLanding>({
+    type: 'first',
+  })
+  const [paginatedInfo, setPaginatedInfo] = useState<{
+    currentPage: number
+    totalPages: number
+    percent: number
+  }>({ currentPage: 0, totalPages: 1, percent: 0 })
 
   const [theme, setTheme] = useState<ReaderTheme>(readInitialTheme)
   const [fontSize, setFontSize] = useState<number>(readInitialFontSize)
@@ -269,7 +316,15 @@ export function ReaderView() {
               chapterId: cloudProgress.chapter_id,
               percent: cloudProgress.scroll_percent,
             }
+            setPaginatedLanding({
+              type: 'percent',
+              value: cloudProgress.scroll_percent,
+            })
+          } else {
+            setPaginatedLanding({ type: 'first' })
           }
+        } else {
+          setPaginatedLanding({ type: 'first' })
         }
 
         setActiveChapterId(resolvedChapterId)
@@ -312,9 +367,9 @@ export function ReaderView() {
     }
   }, [bookId, isInvalidBookId, activeChapterId])
 
-  // StrictMode-safe scroll restoration after chapter DOM mounts (and after illustrations load)
+  // Scroll-mode restoration after chapter DOM mounts (and after illustrations load)
   useEffect(() => {
-    if (!chapter) {
+    if (isPaginated || !chapter) {
       return
     }
 
@@ -347,10 +402,8 @@ export function ReaderView() {
         }
       }
 
-      // Suppress scroll sync while waiting for layout & images to settle
       suppressScrollSyncUntilRef.current = Date.now() + 1200
 
-      // Double requestAnimationFrame guarantees DOM paint of content_html before measuring scrollHeight
       raf1 = window.requestAnimationFrame(() => {
         raf2 = window.requestAnimationFrame(() => {
           applyRestore()
@@ -363,7 +416,6 @@ export function ReaderView() {
         })
       })
 
-      // Re-calibrate if illustrations inside the chapter finish loading after initial paint
       const imgNodes = Array.from(articleRef.current?.querySelectorAll('img') ?? [])
       const handleImageLoad = () => {
         applyRestore()
@@ -392,17 +444,22 @@ export function ReaderView() {
       }
     }
 
-    // Only scroll back to top on explicit chapter switches (never clobbering initial restore)
     if (shouldScrollTopOnNextChapterRef.current) {
       shouldScrollTopOnNextChapterRef.current = false
       suppressScrollSyncUntilRef.current = Date.now() + 700
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
-  }, [chapter])
+  }, [isPaginated, chapter])
 
-  // Debounced silent scroll progress sync (1.5s) + flush on page hide / unmount
+  // Scroll-mode debounced silent progress sync + flush on pagehide / unmount
   useEffect(() => {
-    if (isInvalidBookId || !activeChapterId || !chapter || chapter.id !== activeChapterId) {
+    if (
+      isPaginated ||
+      isInvalidBookId ||
+      !activeChapterId ||
+      !chapter ||
+      chapter.id !== activeChapterId
+    ) {
       return
     }
 
@@ -465,40 +522,163 @@ export function ReaderView() {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       flushPendingWithKeepalive()
     }
-  }, [bookId, isInvalidBookId, activeChapterId, chapter, syncProgressToCloud])
+  }, [isPaginated, bookId, isInvalidBookId, activeChapterId, chapter, syncProgressToCloud])
+
+  // Paginated-mode keepalive flush on pagehide / unmount
+  useEffect(() => {
+    if (!isPaginated || isInvalidBookId || !activeChapterId) {
+      return
+    }
+
+    const flushPaginated = () => {
+      if (pageSyncTimerRef.current !== null) {
+        window.clearTimeout(pageSyncTimerRef.current)
+        pageSyncTimerRef.current = null
+      }
+      const pendingDirty = dirtyScrollRef.current
+      if (!pendingDirty || pendingDirty.chapterId !== activeChapterId) {
+        return
+      }
+      lastSyncedRef.current = pendingDirty
+      dirtyScrollRef.current = null
+      sendProgressKeepalive(bookId, pendingDirty.chapterId, pendingDirty.scrollPercent)
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        flushPaginated()
+      }
+    }
+
+    window.addEventListener('pagehide', flushPaginated)
+    window.addEventListener('beforeunload', flushPaginated)
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    return () => {
+      window.removeEventListener('pagehide', flushPaginated)
+      window.removeEventListener('beforeunload', flushPaginated)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      flushPaginated()
+    }
+  }, [isPaginated, bookId, isInvalidBookId, activeChapterId])
 
   const selectChapter = useCallback(
-    (targetId: number) => {
+    (targetId: number, landing: PaginatedLanding = { type: 'first' }) => {
       if (scrollDebounceTimerRef.current !== null) {
         window.clearTimeout(scrollDebounceTimerRef.current)
         scrollDebounceTimerRef.current = null
       }
+      if (pageSyncTimerRef.current !== null) {
+        window.clearTimeout(pageSyncTimerRef.current)
+        pageSyncTimerRef.current = null
+      }
       dirtyScrollRef.current = null
       pendingScrollRestoreRef.current = null
-      shouldScrollTopOnNextChapterRef.current = true
+      shouldScrollTopOnNextChapterRef.current = landing.type === 'first'
+      setPaginatedLanding(landing)
       setActiveChapterId(targetId)
       setSearchParams({ chapter: String(targetId) }, { replace: true })
       setTocOpen(false)
-      syncProgressToCloud(targetId, 0, true)
+      const initialPercent =
+        landing.type === 'last' ? 100 : landing.type === 'percent' ? landing.value : 0
+      syncProgressToCloud(targetId, initialPercent, true)
     },
     [setSearchParams, syncProgressToCloud],
   )
 
-  const goPrev = useCallback(() => {
+  const goPrevChapter = useCallback(() => {
     if (chapter?.prev_chapter_id) {
-      selectChapter(chapter.prev_chapter_id)
+      selectChapter(
+        chapter.prev_chapter_id,
+        isPaginated ? { type: 'last' } : { type: 'first' },
+      )
     }
-  }, [chapter, selectChapter])
+  }, [chapter, isPaginated, selectChapter])
 
-  const goNext = useCallback(() => {
+  const goNextChapter = useCallback(() => {
     if (chapter?.next_chapter_id) {
-      selectChapter(chapter.next_chapter_id)
+      selectChapter(chapter.next_chapter_id, { type: 'first' })
     }
   }, [chapter, selectChapter])
 
-  // Keyboard shortcuts: Left / Right for prev/next chapter, Esc to close TOC
+  const handlePaginatedStateChange = useCallback(
+    (state: { currentPage: number; totalPages: number; percent: number }) => {
+      setPaginatedInfo((prev) =>
+        prev.currentPage === state.currentPage &&
+        prev.totalPages === state.totalPages &&
+        prev.percent === state.percent
+          ? prev
+          : state,
+      )
+    },
+    [],
+  )
+
+  const handlePaginatedUserTurn = useCallback(
+    (percent: number) => {
+      if (!activeChapterId) {
+        return
+      }
+      dirtyScrollRef.current = { chapterId: activeChapterId, scrollPercent: percent }
+      if (pageSyncTimerRef.current !== null) {
+        window.clearTimeout(pageSyncTimerRef.current)
+      }
+      pageSyncTimerRef.current = window.setTimeout(() => {
+        pageSyncTimerRef.current = null
+        syncProgressToCloud(activeChapterId, percent)
+      }, PAGE_SYNC_DEBOUNCE_MS)
+    },
+    [activeChapterId, syncProgressToCloud],
+  )
+
+  const handleChangeReadingMode = useCallback(
+    (nextMode: ReadingMode) => {
+      if (nextMode === readingMode) {
+        return
+      }
+      // Preserve current reading position seamlessly across mode switches
+      const currentPercent = isPaginated
+        ? (paginatedRef.current?.getCurrentPercent() ?? paginatedInfo.percent)
+        : computeScrollPercent()
+
+      if (chapter) {
+        if (nextMode === 'scroll') {
+          pendingScrollRestoreRef.current = {
+            chapterId: chapter.id,
+            percent: currentPercent,
+          }
+          shouldScrollTopOnNextChapterRef.current = false
+        } else {
+          setPaginatedLanding({ type: 'percent', value: currentPercent })
+        }
+        syncProgressToCloud(chapter.id, currentPercent)
+      }
+
+      void updatePreferences({ reading_mode: nextMode }).catch(() => {
+        // Optimistic update rolls back automatically on failure
+      })
+    },
+    [
+      readingMode,
+      isPaginated,
+      paginatedInfo.percent,
+      chapter,
+      syncProgressToCloud,
+      updatePreferences,
+    ],
+  )
+
+  const handleScrollArticleClick = useCallback((event: MouseEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement | null
+    const imgEl = target?.closest('img')
+    if (imgEl instanceof HTMLImageElement) {
+      setInlineLightbox({ src: imgEl.src, alt: imgEl.alt || null })
+    }
+  }, [])
+
+  // Keyboard shortcuts: Left / Right for page (paginated) or chapter (scroll), Esc to close TOC
   useEffect(() => {
-    if (galleryOpen) {
+    if (galleryOpen || inlineLightbox !== null) {
       return
     }
     const onKeyDown = (event: KeyboardEvent) => {
@@ -508,14 +688,22 @@ export function ReaderView() {
       if (event.key === 'Escape' && tocOpen) {
         setTocOpen(false)
       } else if (event.key === 'ArrowLeft' && !tocOpen) {
-        goPrev()
+        if (isPaginated) {
+          paginatedRef.current?.prevPage()
+        } else {
+          goPrevChapter()
+        }
       } else if (event.key === 'ArrowRight' && !tocOpen) {
-        goNext()
+        if (isPaginated) {
+          paginatedRef.current?.nextPage()
+        } else {
+          goNextChapter()
+        }
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [galleryOpen, tocOpen, goPrev, goNext])
+  }, [galleryOpen, inlineLightbox, tocOpen, isPaginated, goPrevChapter, goNextChapter])
 
   const currentReadOrderIndex = useMemo(() => {
     const activeOrder = chapter?.order_index ?? 0
@@ -528,21 +716,34 @@ export function ReaderView() {
     return idx >= 0 ? idx + 1 : chapter.order_index
   }, [toc, chapter])
 
+  const canGoPrevPage = Boolean(
+    paginatedInfo.currentPage > 0 || chapter?.prev_chapter_id,
+  )
+  const canGoNextPage = Boolean(
+    paginatedInfo.currentPage < paginatedInfo.totalPages - 1 || chapter?.next_chapter_id,
+  )
+
   return (
-    <div className={`min-h-screen transition-colors duration-200 ${styles.page}`}>
-      {/* Sticky Top Toolbar */}
+    <div
+      className={`transition-colors duration-200 ${styles.page} ${
+        isPaginated ? 'flex h-screen flex-col overflow-hidden' : 'min-h-screen'
+      }`}
+    >
+      {/* Top Toolbar */}
       <header
-        className={`sticky top-0 z-30 border-b backdrop-blur-md transition-colors duration-200 ${styles.bar}`}
+        className={`z-30 shrink-0 border-b backdrop-blur-md transition-colors duration-200 ${
+          isPaginated ? '' : 'sticky top-0'
+        } ${styles.bar}`}
       >
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-3 px-3 sm:px-6">
-          {/* Left: Back to shelf + TOC trigger */}
-          <div className="flex items-center gap-2">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-3 sm:gap-3 sm:px-6">
+          {/* Left: Back to shelf + TOC + optional Gallery */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <Link
               to="/"
               className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${styles.button}`}
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">返回书架</span>
+              <span className="hidden md:inline">返回书架</span>
             </Link>
 
             <button
@@ -563,7 +764,7 @@ export function ReaderView() {
                 className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${styles.button}`}
               >
                 <Images className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">插画</span>
+                <span className="hidden md:inline">插画</span>
               </button>
             )}
           </div>
@@ -580,10 +781,41 @@ export function ReaderView() {
             )}
           </div>
 
-          {/* Right: Font size & theme switcher */}
+          {/* Right: Reading mode switcher + Font size + Theme switcher */}
           <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Reading mode switcher: Scroll / Slide / Flip */}
+            <div
+              role="group"
+              aria-label="翻书方式"
+              className={`flex items-center rounded-lg border p-0.5 ${styles.divider}`}
+            >
+              {READING_MODE_OPTIONS.map(({ key, label, title, icon: Icon }) => {
+                const active = readingMode === key
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    title={title}
+                    aria-label={title}
+                    aria-pressed={active}
+                    onClick={() => handleChangeReadingMode(key)}
+                    className={`inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium transition sm:px-2 ${
+                      active
+                        ? theme === 'dark'
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'bg-zinc-900 text-white shadow-xs'
+                        : 'opacity-70 hover:opacity-100'
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    <span className="hidden lg:inline">{label}</span>
+                  </button>
+                )
+              })}
+            </div>
+
             {/* Font size adjuster */}
-            <div className={`hidden items-center rounded-lg border sm:flex ${styles.divider}`}>
+            <div className={`hidden items-center rounded-lg border md:flex ${styles.divider}`}>
               <button
                 type="button"
                 aria-label="减小字号"
@@ -593,7 +825,7 @@ export function ReaderView() {
               >
                 <Minus className="h-3.5 w-3.5" />
               </button>
-              <span className="min-w-[38px] text-center text-xs font-medium tabular-nums">
+              <span className="min-w-[34px] text-center text-xs font-medium tabular-nums">
                 {fontSize}
               </span>
               <button
@@ -640,7 +872,9 @@ export function ReaderView() {
       </header>
 
       {/* Mobile font-size quick bar */}
-      <div className={`flex items-center justify-center gap-3 border-b py-1.5 text-xs sm:hidden ${styles.divider}`}>
+      <div
+        className={`flex shrink-0 items-center justify-center gap-3 border-b py-1.5 text-xs md:hidden ${styles.divider}`}
+      >
         <span className={styles.muted}>字号</span>
         <button
           type="button"
@@ -661,112 +895,217 @@ export function ReaderView() {
         </button>
       </div>
 
-      {/* Main Reader Content */}
-      <main className="mx-auto max-w-3xl px-5 pt-8 pb-24 sm:px-10 sm:pt-12">
-        {loadingToc ? (
-          <div className="flex flex-col items-center justify-center py-32">
-            <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
-            <p className={`mt-3 text-sm ${styles.muted}`}>正在打开书籍...</p>
-          </div>
-        ) : displayError ? (
-          <div className="my-16 rounded-2xl border border-rose-300/60 bg-rose-500/10 p-8 text-center">
-            <p className="text-sm font-medium text-rose-600 dark:text-rose-400">
-              {displayError}
-            </p>
-            <Link
-              to="/"
-              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white"
+      {/* Main Reader Stage */}
+      {isPaginated ? (
+        <>
+          <main className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-5 py-5 sm:px-10 sm:py-6">
+            {loadingToc ? (
+              <div className="flex flex-1 flex-col items-center justify-center">
+                <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
+                <p className={`mt-3 text-sm ${styles.muted}`}>正在打开书籍...</p>
+              </div>
+            ) : displayError ? (
+              <div className="my-auto rounded-2xl border border-rose-300/60 bg-rose-500/10 p-8 text-center">
+                <p className="text-sm font-medium text-rose-600 dark:text-rose-400">
+                  {displayError}
+                </p>
+                <Link
+                  to="/"
+                  className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white"
+                >
+                  返回书架
+                </Link>
+              </div>
+            ) : !toc || toc.chapters.length === 0 ? (
+              <div className="my-auto text-center">
+                <p className={`text-sm ${styles.muted}`}>
+                  {toc?.parse_status === 'completed'
+                    ? '这本书暂未提取到可阅读章节。'
+                    : '这本书尚未解析完成，请稍后返回书架查看。'}
+                </p>
+                <Link
+                  to="/"
+                  className={`mt-5 inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-medium ${styles.button}`}
+                >
+                  返回书架
+                </Link>
+              </div>
+            ) : loadingChapter && !chapter ? (
+              <div className="flex flex-1 flex-col items-center justify-center">
+                <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
+                <p className={`mt-3 text-sm ${styles.muted}`}>正在加载章节正文...</p>
+              </div>
+            ) : chapter ? (
+              <div
+                className={`min-h-0 flex-1 transition-opacity duration-150 ${
+                  loadingChapter ? 'opacity-50' : 'opacity-100'
+                }`}
+              >
+                <PaginatedChapterView
+                  ref={paginatedRef}
+                  chapter={chapter}
+                  chapterPosition={currentChapterPosition}
+                  totalChapters={toc.chapters.length}
+                  mode={readingMode}
+                  fontSize={fontSize}
+                  theme={theme}
+                  landing={paginatedLanding}
+                  onPageStateChange={handlePaginatedStateChange}
+                  onUserPageTurn={handlePaginatedUserTurn}
+                  onRequestPrevChapter={goPrevChapter}
+                  onRequestNextChapter={goNextChapter}
+                  onImageClick={setInlineLightbox}
+                />
+              </div>
+            ) : null}
+          </main>
+
+          {/* Compact Paginated Bottom Bar */}
+          {toc && chapter && (
+            <footer
+              className={`shrink-0 border-t backdrop-blur-md transition-colors duration-200 ${styles.bar}`}
             >
-              返回书架
-            </Link>
-          </div>
-        ) : !toc || toc.chapters.length === 0 ? (
-          <div className="my-16 text-center">
-            <p className={`text-sm ${styles.muted}`}>
-              {toc?.parse_status === 'completed'
-                ? '这本书暂未提取到可阅读章节。'
-                : '这本书尚未解析完成，请稍后返回书架查看。'}
-            </p>
-            <Link
-              to="/"
-              className={`mt-5 inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-medium ${styles.button}`}
-            >
-              返回书架
-            </Link>
-          </div>
-        ) : loadingChapter && !chapter ? (
-          <div className="flex flex-col items-center justify-center py-32">
-            <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
-            <p className={`mt-3 text-sm ${styles.muted}`}>正在加载章节正文...</p>
-          </div>
-        ) : chapter ? (
-          <>
-            <div className={`mb-8 border-b pb-5 ${styles.divider}`}>
-              <p className={`text-xs font-medium tracking-wider uppercase ${styles.muted}`}>
-                Chapter {currentChapterPosition} / {toc.chapters.length}
-                {chapter.word_count > 0 ? ` · ${chapter.word_count.toLocaleString()} 字` : ''}
-              </p>
-              <h1 className="mt-2 text-2xl font-bold leading-snug sm:text-3xl">
-                {chapter.title}
-              </h1>
+              <div className="mx-auto flex h-12 max-w-3xl items-center justify-between gap-3 px-4 sm:px-10">
+                <button
+                  type="button"
+                  disabled={!canGoPrevPage || loadingChapter}
+                  onClick={() => paginatedRef.current?.prevPage()}
+                  className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-35 ${styles.button}`}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  {paginatedInfo.currentPage === 0 ? '上一章' : '上一页'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTocOpen(true)}
+                  className={`cursor-pointer text-xs tabular-nums transition hover:opacity-100 ${styles.muted}`}
+                >
+                  第 {paginatedInfo.currentPage + 1} / {paginatedInfo.totalPages} 页 ·
+                  第 {currentChapterPosition}/{toc.chapters.length} 章
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!canGoNextPage || loadingChapter}
+                  onClick={() => paginatedRef.current?.nextPage()}
+                  className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-35 ${styles.button}`}
+                >
+                  {paginatedInfo.currentPage >= paginatedInfo.totalPages - 1
+                    ? '下一章'
+                    : '下一页'}
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </footer>
+          )}
+        </>
+      ) : (
+        <main className="mx-auto max-w-3xl px-5 pt-8 pb-24 sm:px-10 sm:pt-12">
+          {loadingToc ? (
+            <div className="flex flex-col items-center justify-center py-32">
+              <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
+              <p className={`mt-3 text-sm ${styles.muted}`}>正在打开书籍...</p>
             </div>
-
-            <article
-              ref={articleRef}
-              style={{ fontSize: `${fontSize}px` }}
-              className={`ln-reader-content transition-opacity duration-150 ${
-                loadingChapter ? 'opacity-50' : 'opacity-100'
-              }`}
-              dangerouslySetInnerHTML={{ __html: chapter.content_html }}
-            />
-
-            {/* Bottom chapter navigation */}
-            <nav
-              aria-label="章节导航"
-              className={`mt-14 flex items-center justify-between gap-3 border-t pt-8 ${styles.divider}`}
-            >
-              <button
-                type="button"
-                disabled={!chapter.prev_chapter_id || loadingChapter}
-                onClick={goPrev}
-                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles.button}`}
+          ) : displayError ? (
+            <div className="my-16 rounded-2xl border border-rose-300/60 bg-rose-500/10 p-8 text-center">
+              <p className="text-sm font-medium text-rose-600 dark:text-rose-400">
+                {displayError}
+              </p>
+              <Link
+                to="/"
+                className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white"
               >
-                <ChevronLeft className="h-4 w-4" />
-                上一章
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setTocOpen(true)}
-                className={`cursor-pointer rounded-xl border px-4 py-2.5 text-xs font-medium transition ${styles.button}`}
+                返回书架
+              </Link>
+            </div>
+          ) : !toc || toc.chapters.length === 0 ? (
+            <div className="my-16 text-center">
+              <p className={`text-sm ${styles.muted}`}>
+                {toc?.parse_status === 'completed'
+                  ? '这本书暂未提取到可阅读章节。'
+                  : '这本书尚未解析完成，请稍后返回书架查看。'}
+              </p>
+              <Link
+                to="/"
+                className={`mt-5 inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-medium ${styles.button}`}
               >
-                目录 ({currentChapterPosition}/{toc.chapters.length})
-              </button>
+                返回书架
+              </Link>
+            </div>
+          ) : loadingChapter && !chapter ? (
+            <div className="flex flex-col items-center justify-center py-32">
+              <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
+              <p className={`mt-3 text-sm ${styles.muted}`}>正在加载章节正文...</p>
+            </div>
+          ) : chapter ? (
+            <>
+              <div className={`mb-8 border-b pb-5 ${styles.divider}`}>
+                <p className={`text-xs font-medium tracking-wider uppercase ${styles.muted}`}>
+                  Chapter {currentChapterPosition} / {toc.chapters.length}
+                  {chapter.word_count > 0 ? ` · ${chapter.word_count.toLocaleString()} 字` : ''}
+                </p>
+                <h1 className="mt-2 text-2xl font-bold leading-snug sm:text-3xl">
+                  {chapter.title}
+                </h1>
+              </div>
 
-              <button
-                type="button"
-                disabled={!chapter.next_chapter_id || loadingChapter}
-                onClick={goNext}
-                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles.button}`}
+              <article
+                ref={articleRef}
+                onClick={handleScrollArticleClick}
+                style={{ fontSize: `${fontSize}px` }}
+                className={`ln-reader-content transition-opacity duration-150 ${
+                  loadingChapter ? 'opacity-50' : 'opacity-100'
+                }`}
+                dangerouslySetInnerHTML={{ __html: chapter.content_html }}
+              />
+
+              {/* Bottom chapter navigation */}
+              <nav
+                aria-label="章节导航"
+                className={`mt-14 flex items-center justify-between gap-3 border-t pt-8 ${styles.divider}`}
               >
-                下一章
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </nav>
-          </>
-        ) : null}
-      </main>
+                <button
+                  type="button"
+                  disabled={!chapter.prev_chapter_id || loadingChapter}
+                  onClick={goPrevChapter}
+                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles.button}`}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  上一章
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTocOpen(true)}
+                  className={`cursor-pointer rounded-xl border px-4 py-2.5 text-xs font-medium transition ${styles.button}`}
+                >
+                  目录 ({currentChapterPosition}/{toc.chapters.length})
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!chapter.next_chapter_id || loadingChapter}
+                  onClick={goNextChapter}
+                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles.button}`}
+                >
+                  下一章
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </nav>
+            </>
+          ) : null}
+        </main>
+      )}
 
       {/* Slide-over TOC Drawer */}
       {tocOpen && (
         <div className="fixed inset-0 z-50 flex">
-          {/* Backdrop */}
           <div
             className="fixed inset-0 bg-black/45 backdrop-blur-[1px]"
             onClick={() => setTocOpen(false)}
           />
 
-          {/* Drawer panel */}
           <aside
             className={`relative z-10 flex h-full w-80 max-w-[85vw] flex-col border-r shadow-2xl ${styles.drawer}`}
           >
@@ -806,7 +1145,7 @@ export function ReaderView() {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => selectChapter(item.id)}
+                    onClick={() => selectChapter(item.id, { type: 'first' })}
                     className={`flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left text-sm transition hover:bg-black/5 ${
                       isActive ? styles.activeChapter : ''
                     }`}
@@ -824,6 +1163,7 @@ export function ReaderView() {
           </aside>
         </div>
       )}
+
       {/* On-demand spoiler-safe Illustration Gallery & Lightbox */}
       {galleryOpen && user?.enable_gallery && !isInvalidBookId && (
         <IllustrationGalleryModal
@@ -832,6 +1172,15 @@ export function ReaderView() {
           currentReadOrderIndex={currentReadOrderIndex}
           hideUnread={user.hide_unread_illustrations}
           onClose={() => setGalleryOpen(false)}
+        />
+      )}
+
+      {/* Inline Chapter Illustration Lightbox */}
+      {inlineLightbox && (
+        <InlineImageLightbox
+          src={inlineLightbox.src}
+          alt={inlineLightbox.alt}
+          onClose={() => setInlineLightbox(null)}
         />
       )}
     </div>

@@ -57,6 +57,12 @@ def _ensure_user_preference_columns(sync_conn) -> None:
                 "ALTER TABLE users ADD COLUMN hide_unread_illustrations BOOLEAN NOT NULL DEFAULT 1"
             )
         )
+    if "reading_mode" not in existing_cols:
+        sync_conn.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN reading_mode VARCHAR(16) NOT NULL DEFAULT 'scroll'"
+            )
+        )
 
 
 async def init_db() -> None:

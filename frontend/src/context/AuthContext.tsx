@@ -87,6 +87,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ...(payload.hide_unread_illustrations !== undefined
             ? { hide_unread_illustrations: payload.hide_unread_illustrations }
             : {}),
+          ...(payload.reading_mode !== undefined
+            ? { reading_mode: payload.reading_mode }
+            : {}),
         }
       })
 

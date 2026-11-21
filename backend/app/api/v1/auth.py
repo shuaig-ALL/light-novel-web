@@ -114,6 +114,8 @@ async def update_preferences(
         current_user.enable_gallery = payload.enable_gallery
     if payload.hide_unread_illustrations is not None:
         current_user.hide_unread_illustrations = payload.hide_unread_illustrations
+    if payload.reading_mode is not None:
+        current_user.reading_mode = payload.reading_mode
 
     await db.commit()
     await db.refresh(current_user)
