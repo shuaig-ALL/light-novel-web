@@ -4,6 +4,8 @@ import { BookSpine } from './BookSpine'
 
 interface BookShelfProps {
   books: BookListItem[]
+  expandedBookId: number | null
+  onExpandBook: (bookId: number) => void
   onSelectBook: (book: BookListItem) => void
   onDeleteBook: (book: BookListItem) => void
   onRequestUpload: () => void
@@ -21,6 +23,8 @@ function chunkBooks(books: BookListItem[], size: number): BookListItem[][] {
 
 export function BookShelf({
   books,
+  expandedBookId,
+  onExpandBook,
   onSelectBook,
   onDeleteBook,
   onRequestUpload,
@@ -28,7 +32,7 @@ export function BookShelf({
   if (books.length === 0) {
     return (
       <div className="mx-auto mt-10 max-w-2xl">
-        <div className="rounded-2xl border border-dashed border-zinc-200 bg-white px-8 py-16 text-center">
+        <div className="rounded-2xl border border-dashed border-zinc-200 bg-white px-6 py-14 text-center sm:px-8 sm:py-16">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-900">
             <BookMarked className="h-5 w-5" strokeWidth={1.75} />
           </div>
@@ -57,16 +61,18 @@ export function BookShelf({
   const shelfRows = chunkBooks(books, BOOKS_PER_SHELF)
 
   return (
-    <div className="space-y-14">
+    <div className="space-y-12 sm:space-y-14">
       {shelfRows.map((row, rowIndex) => (
         <section key={rowIndex} aria-label={`书架第 ${rowIndex + 1} 层`}>
-          {/* Single non-wrapping shelf row: tightly stacked by default, smoothly parts neighbors on hover */}
-          <div className="overflow-x-auto pt-8 pr-16 pb-1 pl-6 sm:pr-20 sm:pl-10">
+          {/* Single non-wrapping shelf row: tightly stacked by default, smoothly parts neighbors */}
+          <div className="overflow-x-auto pt-8 pr-16 pb-1 pl-4 sm:pr-20 sm:pl-10">
             <div className="flex w-max flex-nowrap items-end gap-0.5">
               {row.map((book) => (
                 <BookSpine
                   key={book.id}
                   book={book}
+                  isExpanded={expandedBookId === book.id}
+                  onExpand={onExpandBook}
                   onSelect={onSelectBook}
                   onRequestDelete={onDeleteBook}
                 />

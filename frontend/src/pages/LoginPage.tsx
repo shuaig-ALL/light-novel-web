@@ -89,7 +89,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-white px-4 py-12 text-zinc-900">
+    <div className="pt-safe pb-safe flex min-h-[100dvh] flex-col items-center justify-center bg-white px-4 py-12 text-zinc-900">
       <div className="w-full max-w-[380px]">
         {/* Brand header */}
         <div className="mb-8 flex flex-col items-center text-center">
@@ -157,7 +157,7 @@ export function LoginPage() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder={mode === 'login' ? '输入用户名或邮箱' : '至少 2 个字符'}
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none"
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3.5 py-2.5 text-base text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none sm:text-sm"
               />
             </div>
 
@@ -176,7 +176,7 @@ export function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@example.com"
-                  className="w-full rounded-lg border border-zinc-200 bg-white px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none"
+                  className="w-full rounded-lg border border-zinc-200 bg-white px-3.5 py-2.5 text-base text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none sm:text-sm"
                 />
               </div>
             )}
@@ -196,7 +196,7 @@ export function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={mode === 'login' ? '输入密码' : '至少 6 位密码'}
-                  className="w-full rounded-lg border border-zinc-200 bg-white py-2.5 pr-10 pl-3.5 text-sm text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none"
+                  className="w-full rounded-lg border border-zinc-200 bg-white py-2.5 pr-10 pl-3.5 text-base text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none sm:text-sm"
                 />
                 <button
                   type="button"
@@ -228,7 +228,7 @@ export function LoginPage() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="再次输入密码"
-                  className="w-full rounded-lg border border-zinc-200 bg-white px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none"
+                  className="w-full rounded-lg border border-zinc-200 bg-white px-3.5 py-2.5 text-base text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none sm:text-sm"
                 />
               </div>
             )}

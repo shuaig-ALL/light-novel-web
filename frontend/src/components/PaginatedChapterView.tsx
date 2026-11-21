@@ -7,6 +7,7 @@ import {
   useState,
   type CSSProperties,
   type MouseEvent,
+  type TouchEvent,
 } from 'react'
 import type { ChapterDetailResponse } from '../api/books'
 
@@ -37,10 +38,13 @@ interface PaginatedChapterViewProps {
   onUserPageTurn: (percent: number) => void
   onRequestPrevChapter: () => void
   onRequestNextChapter: () => void
+  onToggleChrome: () => void
   onImageClick: (image: { src: string; alt: string | null }) => void
 }
 
 const COLUMN_GAP = 48
+const SWIPE_THRESHOLD_PX = 42
+const SWIPE_HORIZONTAL_RATIO = 1.4
 
 const LEAF_PAPER_STYLES: Record<'light' | 'sepia' | 'dark', string> = {
   light: 'bg-gradient-to-r from-stone-100 via-white to-stone-50 border-r border-stone-200',
@@ -79,6 +83,7 @@ export const PaginatedChapterView = forwardRef<
     onUserPageTurn,
     onRequestPrevChapter,
     onRequestNextChapter,
+    onToggleChrome,
     onImageClick,
   },
   ref,
@@ -104,12 +109,13 @@ export const PaginatedChapterView = forwardRef<
     direction: 'next' | 'prev'
   } | null>(null)
 
-  // Track the desired progress ratio across resizes / fontSize changes / image loads
   const ratioRef = useRef<number>(
     landing.type === 'percent' ? landing.value : landing.type === 'last' ? 100 : 0,
   )
   const pendingLastPageRef = useRef<boolean>(landing.type === 'last')
   const flipTimerRef = useRef<number | null>(null)
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+  const lastSwipeAtRef = useRef<number>(0)
 
   // Reset desired target when chapter or landing changes
   useEffect(() => {
@@ -292,13 +298,54 @@ export const PaginatedChapterView = forwardRef<
     [nextPage, prevPage, currentPage, totalPages],
   )
 
+  const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) {
+      touchStartRef.current = null
+      return
+    }
+    const touch = event.touches[0]
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY }
+  }
+
+  const handleTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
+    const start = touchStartRef.current
+    touchStartRef.current = null
+    if (!start || event.changedTouches.length === 0) {
+      return
+    }
+    const touch = event.changedTouches[0]
+    const dx = touch.clientX - start.x
+    const dy = touch.clientY - start.y
+    const absX = Math.abs(dx)
+    const absY = Math.abs(dy)
+
+    // Require clear horizontal intent so minor vertical thumb motion never turns pages
+    if (absX >= SWIPE_THRESHOLD_PX && absX > absY * SWIPE_HORIZONTAL_RATIO) {
+      lastSwipeAtRef.current = Date.now()
+      if (dx < 0) {
+        nextPage()
+      } else {
+        prevPage()
+      }
+    }
+  }
+
+  const handleTouchCancel = () => {
+    touchStartRef.current = null
+  }
+
   const handleFrameClick = (event: MouseEvent<HTMLDivElement>) => {
+    // Suppress synthetic click immediately following a horizontal swipe
+    if (Date.now() - lastSwipeAtRef.current < 350) {
+      return
+    }
+
     const target = event.target as HTMLElement | null
     if (!target) {
       return
     }
 
-    // Intercept inline illustration clicks first so they open lightbox instead of turning page
+    // Priority 1: Inline illustration click always opens fullscreen lightbox
     const imgEl = target.closest('img')
     if (imgEl instanceof HTMLImageElement) {
       event.stopPropagation()
@@ -306,7 +353,7 @@ export const PaginatedChapterView = forwardRef<
       return
     }
 
-    // Do not turn page if user clicked a link/button or selected text
+    // Priority 2: Do not turn page if clicking interactive elements or selecting text
     if (target.closest('a, button')) {
       return
     }
@@ -319,11 +366,15 @@ export const PaginatedChapterView = forwardRef<
     if (rect.width <= 0) {
       return
     }
+
+    // Priority 3: Left (<30%) prev, Right (>70%) next, Center (30%~70%) toggle toolbar chrome
     const relativeX = (event.clientX - rect.left) / rect.width
-    if (relativeX < 0.34) {
+    if (relativeX < 0.3) {
       prevPage()
-    } else if (relativeX > 0.66) {
+    } else if (relativeX > 0.7) {
       nextPage()
+    } else {
+      onToggleChrome()
     }
   }
 
@@ -351,7 +402,10 @@ export const PaginatedChapterView = forwardRef<
     <div
       ref={frameRef}
       onClick={handleFrameClick}
-      className="ln-flip-stage relative h-full w-full overflow-hidden select-text"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
+      className="ln-flip-stage ln-paginated-viewport relative h-full w-full overflow-hidden select-text"
     >
       {/* Multi-column paginated chapter flow */}
       <div
@@ -379,10 +433,8 @@ export const PaginatedChapterView = forwardRef<
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
         >
-          {/* Cast shadow sweeping gently across the newly revealed page */}
           <div className="ln-flip-shadow-sweep absolute inset-0 bg-gradient-to-r from-black/20 via-black/8 to-transparent" />
 
-          {/* 3D Turning paper leaf */}
           <div
             className={`absolute inset-0 rounded-r-sm ${LEAF_PAPER_STYLES[theme]} ${
               flipAnim.direction === 'next' ? 'ln-flip-leaf-next' : 'ln-flip-leaf-prev'

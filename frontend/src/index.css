@@ -1,15 +1,53 @@
 @import "tailwindcss";
 
+@layer base {
+  html,
+  body {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
 @layer utilities {
   .writing-vertical {
     writing-mode: vertical-rl;
     text-orientation: mixed;
+  }
+
+  /* iOS Safe Area insets (Dynamic Island / Notch / Home Indicator) */
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .pt-safe-3 {
+    padding-top: calc(0.75rem + env(safe-area-inset-top, 0px));
+  }
+
+  .pb-safe-3 {
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .pb-safe-4 {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .pl-safe {
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+
+  .pr-safe {
+    padding-right: env(safe-area-inset-right, 0px);
   }
 }
 
 /* 3D tightly-stacked books on minimalist shelf (160x240 cover, 34px spine) */
 .book-stage {
   perspective: 1100px;
+  width: 54px;
+  z-index: 0;
 }
 
 .book-3d {
@@ -20,10 +58,100 @@
   will-change: transform;
 }
 
-.group:hover .book-3d,
-.group:focus-visible .book-3d,
-.group:focus-within .book-3d {
+.book-cover-card {
+  box-shadow: 0 6px 14px rgba(24, 24, 27, 0.08);
+}
+
+.book-overlay {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.book-delete-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.book-shadow {
+  margin-left: 4px;
+  width: 48px;
+  transform: skewX(-24deg);
+  background-color: rgba(24, 24, 27, 0.12);
+  filter: blur(4px);
+}
+
+/* Touch / explicit expanded state & keyboard focus-within */
+.book-stage[data-expanded="true"],
+.book-stage:focus-within {
+  width: 216px;
+  z-index: 20;
+}
+
+.book-stage[data-expanded="true"] .book-3d,
+.book-stage:focus-within .book-3d {
   transform: translateX(28px) rotateY(0deg) translateY(-10px);
+}
+
+.book-stage[data-expanded="true"] .book-cover-card,
+.book-stage:focus-within .book-cover-card {
+  border-color: #d4d4d8;
+  box-shadow: 0 22px 40px rgba(24, 24, 27, 0.18);
+}
+
+.book-stage[data-expanded="true"] .book-overlay,
+.book-stage:focus-within .book-overlay {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.book-stage[data-expanded="true"] .book-delete-btn,
+.book-stage:focus-within .book-delete-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.book-stage[data-expanded="true"] .book-shadow,
+.book-stage:focus-within .book-shadow {
+  margin-left: 28px;
+  width: 156px;
+  transform: skewX(0deg);
+  background-color: rgba(24, 24, 27, 0.24);
+  filter: blur(8px);
+}
+
+/* Desktop fine-pointer hover expansion (prevents sticky :hover on iOS Safari) */
+@media (hover: hover) and (pointer: fine) {
+  .book-stage:hover {
+    width: 216px;
+    z-index: 20;
+  }
+
+  .book-stage:hover .book-3d {
+    transform: translateX(28px) rotateY(0deg) translateY(-10px);
+  }
+
+  .book-stage:hover .book-cover-card {
+    border-color: #d4d4d8;
+    box-shadow: 0 22px 40px rgba(24, 24, 27, 0.18);
+  }
+
+  .book-stage:hover .book-overlay {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .book-stage:hover .book-delete-btn {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .book-stage:hover .book-shadow {
+    margin-left: 28px;
+    width: 156px;
+    transform: skewX(0deg);
+    background-color: rgba(24, 24, 27, 0.24);
+    filter: blur(8px);
+  }
 }
 
 .book-face-front {
@@ -115,6 +243,11 @@
 }
 
 /* Multi-column paginated reader layout (slide & flip modes) */
+.ln-paginated-viewport {
+  overscroll-behavior: none;
+  touch-action: pan-y;
+}
+
 .ln-reader-paginated {
   column-fill: auto;
 }
@@ -145,6 +278,7 @@
 /* 3D paper-flip transition animations for flip reading mode */
 .ln-flip-stage {
   perspective: 1800px;
+  overscroll-behavior: none;
 }
 
 @keyframes lnFlipLeafForward {

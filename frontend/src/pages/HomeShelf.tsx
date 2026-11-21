@@ -17,6 +17,7 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type MouseEvent,
 } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deleteBook, getBooks, uploadBook, type BookListItem } from '../api/books'
@@ -46,6 +47,7 @@ export function HomeShelf() {
 
   const [books, setBooks] = useState<BookListItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [expandedBookId, setExpandedBookId] = useState<number | null>(null)
   const [uploadState, setUploadState] = useState<{
     current: number
     total: number
@@ -129,9 +131,9 @@ export function HomeShelf() {
     return () => window.clearInterval(timer)
   }, [hasPendingBooks, refreshBooks])
 
-  // Close delete confirmation or settings modal with Escape
+  // Close delete confirmation, settings modal, or expanded touch book with Escape
   useEffect(() => {
-    if (!bookToDelete && !settingsOpen) {
+    if (!bookToDelete && !settingsOpen && expandedBookId === null) {
       return
     }
     const onKeyDown = (event: KeyboardEvent) => {
@@ -140,12 +142,14 @@ export function HomeShelf() {
           setBookToDelete(null)
         } else if (settingsOpen) {
           setSettingsOpen(false)
+        } else if (expandedBookId !== null) {
+          setExpandedBookId(null)
         }
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [bookToDelete, deleting, settingsOpen])
+  }, [bookToDelete, deleting, settingsOpen, expandedBookId])
 
   const filteredAndSortedBooks = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase()
@@ -165,7 +169,6 @@ export function HomeShelf() {
         const diff = parseTimestamp(b.created_at) - parseTimestamp(a.created_at)
         return diff !== 0 ? diff : b.id - a.id
       }
-      // recent_read: books with reading records first (newest read first), then unread by upload time
       const readA = parseTimestamp(a.last_read_at)
       const readB = parseTimestamp(b.last_read_at)
       if (readA !== readB) {
@@ -305,7 +308,18 @@ export function HomeShelf() {
     }
   }
 
+  const handleBackgroundClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (expandedBookId === null) {
+      return
+    }
+    const target = event.target as HTMLElement | null
+    if (!target?.closest('[data-book-spine="true"]')) {
+      setExpandedBookId(null)
+    }
+  }
+
   const handleSelectBook = (book: BookListItem) => {
+    setExpandedBookId(null)
     navigate(`/read/${book.id}`)
   }
 
@@ -326,6 +340,7 @@ export function HomeShelf() {
       await deleteBook(target.id)
       localStorage.removeItem(`ln_last_chapter_${target.id}`)
       setBookToDelete(null)
+      setExpandedBookId((prev) => (prev === target.id ? null : prev))
       setNotice({ type: 'info', text: `已从书架移除《${target.title}》。` })
       await refreshBooks(false)
     } catch (error) {
@@ -340,8 +355,8 @@ export function HomeShelf() {
 
   const uploadButtonLabel = uploadState
     ? uploadState.total > 1
-      ? `上传中 ${uploadState.current}/${uploadState.total} (${uploadState.percent}%)`
-      : `上传中 ${uploadState.percent}%`
+      ? `${uploadState.current}/${uploadState.total} (${uploadState.percent}%)`
+      : `${uploadState.percent}%`
     : '导入 EPUB'
 
   return (
@@ -350,27 +365,30 @@ export function HomeShelf() {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className="min-h-screen bg-white text-zinc-900"
+      onClick={handleBackgroundClick}
+      className="pb-safe min-h-[100dvh] bg-white text-zinc-900"
     >
-      {/* Hidden file input (supports multi-file batch selection) */}
+      {/* Visually hidden file input using sr-only for reliable iOS Safari Files picker */}
       <input
         ref={fileInputRef}
         type="file"
         accept=".epub,application/epub+zip"
         multiple
-        className="hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+        className="sr-only"
         onChange={(e) => void handleFileChange(e)}
       />
 
-      {/* Minimalist pure-white top navigation bar */}
-      <header className="sticky top-0 z-30 border-b border-zinc-100 bg-white/95 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-900">
-              <BookOpen className="h-4.5 w-4.5" strokeWidth={1.75} />
+      {/* Minimalist pure-white top navigation bar with iOS safe-area top inset */}
+      <header className="pt-safe sticky top-0 z-30 border-b border-zinc-100 bg-white/95 backdrop-blur-md">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-3 sm:h-16 sm:px-8">
+          <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-900 sm:h-9 sm:w-9">
+              <BookOpen className="h-4 w-4 sm:h-4.5 sm:w-4.5" strokeWidth={1.75} />
             </div>
-            <div>
-              <h1 className="text-base font-semibold tracking-tight text-zinc-900 sm:text-lg">
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-semibold tracking-tight text-zinc-900 sm:text-lg">
                 私人轻小说文库
               </h1>
               <p className="hidden text-[11px] text-zinc-400 sm:block">
@@ -379,9 +397,9 @@ export function HomeShelf() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
             {hasPendingBooks && (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-700">
+              <span className="hidden items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-700 md:inline-flex">
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-500" />
                 后台解析中
               </span>
@@ -391,7 +409,8 @@ export function HomeShelf() {
               type="button"
               onClick={() => void refreshBooks(true)}
               title="刷新书架"
-              className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-900"
+              aria-label="刷新书架"
+              className="hidden h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-900 sm:inline-flex"
             >
               <RefreshCw
                 className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
@@ -403,20 +422,21 @@ export function HomeShelf() {
               type="button"
               disabled={uploading}
               onClick={triggerFilePicker}
-              className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-zinc-900 px-3 text-xs font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 sm:gap-2 sm:px-4 sm:text-sm"
             >
               {uploading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin sm:h-4 sm:w-4" />
               ) : (
-                <Upload className="h-4 w-4" strokeWidth={1.75} />
+                <Upload className="h-3.5 w-3.5 sm:h-4 sm:w-4" strokeWidth={1.75} />
               )}
-              <span>{uploadButtonLabel}</span>
+              <span className="sm:hidden">{uploading ? uploadButtonLabel : '导入'}</span>
+              <span className="hidden sm:inline">{uploadButtonLabel}</span>
             </button>
 
             <div className="mx-0.5 hidden h-5 w-px bg-zinc-200 sm:block" />
 
             {user && (
-              <div className="hidden items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs font-medium text-zinc-700 sm:inline-flex">
+              <div className="hidden items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs font-medium text-zinc-700 md:inline-flex">
                 <User className="h-3.5 w-3.5 text-zinc-500" strokeWidth={1.75} />
                 <span className="max-w-[110px] truncate">{user.username}</span>
               </div>
@@ -440,9 +460,9 @@ export function HomeShelf() {
               onClick={handleLogout}
               title="退出登录"
               aria-label="退出登录"
-              className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-900"
+              className="inline-flex h-9 w-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white text-xs font-medium text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-900 md:w-auto md:px-2.5"
             >
-              <LogOut className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <LogOut className="h-4 w-4 md:h-3.5 md:w-3.5" strokeWidth={1.75} />
               <span className="hidden md:inline">退出</span>
             </button>
           </div>
@@ -450,10 +470,10 @@ export function HomeShelf() {
       </header>
 
       {/* Main bookshelf container */}
-      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-8 sm:py-10">
+      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-10">
         {notice && (
           <div
-            className={`mb-6 flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
+            className={`mb-5 flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-xs sm:mb-6 sm:text-sm ${
               notice.type === 'error'
                 ? 'border-zinc-300 bg-zinc-50 text-zinc-900'
                 : 'border-zinc-200 bg-zinc-50/80 text-zinc-700'
@@ -472,21 +492,34 @@ export function HomeShelf() {
         )}
 
         {/* Shelf toolbar: title + minimalist search & sort controls */}
-        <div className="mb-6 flex flex-col gap-3 px-1 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-xs font-medium tracking-wider text-zinc-400 uppercase">
-              My Bookshelf
-            </p>
-            {books.length > 0 && (
-              <p className="mt-0.5 text-xs text-zinc-400">
-                悬停书本转正预览 · 支持直接拖入本地 .epub 文件
+        <div className="mb-6 flex flex-col gap-3 px-0.5 sm:flex-row sm:items-center sm:justify-between sm:px-1">
+          <div className="flex items-center justify-between sm:block">
+            <div>
+              <p className="text-xs font-medium tracking-wider text-zinc-400 uppercase">
+                My Bookshelf
               </p>
+              {books.length > 0 && (
+                <p className="mt-0.5 text-xs text-zinc-400">
+                  <span className="hidden sm:inline">
+                    悬停书本转正预览 · 支持直接拖入本地 .epub 文件
+                  </span>
+                  <span className="sm:hidden">
+                    轻点书脊展开封面 · 再点即可进入阅读
+                  </span>
+                </p>
+              )}
+            </div>
+            {hasPendingBooks && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-medium text-zinc-700 md:hidden">
+                <Loader2 className="h-3 w-3 animate-spin text-zinc-500" />
+                解析中
+              </span>
             )}
           </div>
 
           {books.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2.5">
-              {/* Minimalist search box */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2.5">
+              {/* Minimalist search box (16px on mobile to prevent iOS Safari focus zoom) */}
               <div className="relative w-full sm:w-56">
                 <Search
                   className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400"
@@ -498,25 +531,25 @@ export function HomeShelf() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="搜索书名或作者..."
                   aria-label="搜索书名或作者"
-                  className="w-full rounded-lg border border-zinc-200 bg-white py-1.5 pr-8 pl-8 text-xs text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none"
+                  className="w-full rounded-lg border border-zinc-200 bg-white py-2 pr-8 pl-8 text-base text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none sm:py-1.5 sm:text-xs"
                 />
                 {searchQuery && (
                   <button
                     type="button"
                     aria-label="清空搜索"
                     onClick={() => setSearchQuery('')}
-                    className="absolute top-1/2 right-2 -translate-y-1/2 cursor-pointer rounded p-0.5 text-zinc-400 transition hover:text-zinc-900"
+                    className="absolute top-1/2 right-2 -translate-y-1/2 cursor-pointer rounded p-1 text-zinc-400 transition hover:text-zinc-900"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
 
-              {/* Minimalist sort switcher */}
+              {/* Minimalist sort switcher (full-width 3-column bar on mobile portrait) */}
               <div
                 role="group"
                 aria-label="书架排序方式"
-                className="inline-flex items-center rounded-lg border border-zinc-200 bg-zinc-50 p-0.5"
+                className="grid w-full grid-cols-3 items-center rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 sm:inline-flex sm:w-auto"
               >
                 {SORT_OPTIONS.map(({ key, label }) => {
                   const active = sortBy === key
@@ -526,7 +559,7 @@ export function HomeShelf() {
                       type="button"
                       aria-pressed={active}
                       onClick={() => setSortBy(key)}
-                      className={`cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                      className={`cursor-pointer rounded-md px-2.5 py-1.5 text-center text-xs font-medium transition sm:py-1 ${
                         active
                           ? 'bg-white text-zinc-900 shadow-xs'
                           : 'text-zinc-500 hover:text-zinc-800'
@@ -566,6 +599,8 @@ export function HomeShelf() {
         ) : (
           <BookShelf
             books={filteredAndSortedBooks}
+            expandedBookId={expandedBookId}
+            onExpandBook={setExpandedBookId}
             onSelectBook={handleSelectBook}
             onDeleteBook={setBookToDelete}
             onRequestUpload={triggerFilePicker}
@@ -593,20 +628,20 @@ export function HomeShelf() {
         </div>
       )}
 
-      {/* Minimalist preferences modal */}
+      {/* Minimalist preferences modal (bottom-sheet style on mobile, centered card on sm+) */}
       {settingsOpen && user && (
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="preferences-dialog-title"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
         >
           <div
             className="fixed inset-0 bg-zinc-950/35 backdrop-blur-[2px]"
             onClick={() => setSettingsOpen(false)}
           />
 
-          <div className="relative z-10 w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl">
+          <div className="pb-safe-4 relative z-10 w-full rounded-t-2xl border border-zinc-200 bg-white p-5 shadow-2xl sm:max-w-md sm:rounded-2xl sm:p-6">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-zinc-900">
@@ -731,14 +766,14 @@ export function HomeShelf() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-book-dialog-title"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
         >
           <div
             className="fixed inset-0 bg-zinc-950/35 backdrop-blur-[2px]"
             onClick={() => !deleting && setBookToDelete(null)}
           />
 
-          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl">
+          <div className="pb-safe-4 relative z-10 w-full rounded-t-2xl border border-zinc-200 bg-white p-5 shadow-2xl sm:max-w-sm sm:rounded-2xl sm:p-6">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-900">
                 <Trash2 className="h-4.5 w-4.5" strokeWidth={1.75} />

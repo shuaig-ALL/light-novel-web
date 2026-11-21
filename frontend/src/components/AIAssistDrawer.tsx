@@ -230,10 +230,11 @@ export function AIAssistDrawer({
         onClick={onClose}
       />
 
-      {/* Minimalist pure-white right drawer */}
-      <aside className="relative z-10 flex h-full w-[420px] max-w-[92vw] flex-col border-l border-zinc-200 bg-white text-zinc-900 shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-3 border-b border-zinc-100 px-5 py-4">
+      {/* Minimalist pure-white right drawer (full-width on mobile, 420px on sm+) */}
+      <aside className="relative z-10 flex h-full w-full flex-col border-l border-zinc-200 bg-white text-zinc-900 shadow-2xl sm:w-[420px]">
+        {/* Header with iOS top safe-area inset */}
+        <div className="pt-safe border-b border-zinc-100">
+          <div className="flex items-center justify-between gap-3 px-4 py-3.5 sm:px-5 sm:py-4">
           <div className="flex min-w-0 items-center gap-2.5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-zinc-900">
               <Sparkles className="h-4 w-4" strokeWidth={1.75} />
@@ -268,6 +269,7 @@ export function AIAssistDrawer({
             >
               <X className="h-4 w-4" />
             </button>
+          </div>
           </div>
         </div>
 
@@ -360,10 +362,10 @@ export function AIAssistDrawer({
           <div ref={listEndRef} />
         </div>
 
-        {/* Bottom Q&A input bar */}
+        {/* Bottom Q&A input bar with iOS bottom safe-area inset */}
         <form
           onSubmit={handleSubmitQuestion}
-          className="border-t border-zinc-100 bg-white px-4 py-3"
+          className="pb-safe-3 border-t border-zinc-100 bg-white px-4 pt-3"
         >
           {isStreaming && (
             <div className="mb-2 flex justify-center">
@@ -386,7 +388,7 @@ export function AIAssistDrawer({
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={handleTextareaKeyDown}
               placeholder="针对已读章节提问（如：主角为什么来到这里？）"
-              className="max-h-28 flex-1 resize-none bg-transparent py-1 text-xs leading-5 text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:opacity-60"
+              className="max-h-28 flex-1 resize-none bg-transparent py-1 text-base leading-5 text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:opacity-60 sm:text-xs"
             />
             <button
               type="submit"

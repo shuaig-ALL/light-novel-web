@@ -1,45 +1,84 @@
 import { AlertCircle, BookOpen, Loader2, Trash2 } from 'lucide-react'
+import { useRef, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
 import type { BookListItem } from '../api/books'
 
 interface BookSpineProps {
   book: BookListItem
+  isExpanded: boolean
+  onExpand: (bookId: number) => void
   onSelect: (book: BookListItem) => void
   onRequestDelete: (book: BookListItem) => void
 }
 
-export function BookSpine({ book, onSelect, onRequestDelete }: BookSpineProps) {
+export function BookSpine({
+  book,
+  isExpanded,
+  onExpand,
+  onSelect,
+  onRequestDelete,
+}: BookSpineProps) {
   const isParsing = book.parse_status === 'pending' || book.parse_status === 'processing'
   const isFailed = book.parse_status === 'failed'
   const isReadable = book.parse_status === 'completed'
 
-  const handleOpen = () => {
+  const lastPointerTypeRef = useRef<string>('mouse')
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    lastPointerTypeRef.current = event.pointerType || 'mouse'
+  }
+
+  const handleCardClick = (event: MouseEvent<HTMLDivElement>) => {
+    event.stopPropagation()
+
+    const isTouchInteraction =
+      lastPointerTypeRef.current === 'touch' ||
+      lastPointerTypeRef.current === 'pen' ||
+      window.matchMedia('(hover: none)').matches
+
+    // On touch devices without hover: first tap expands the book; second tap opens the reader
+    if (isTouchInteraction && !isExpanded) {
+      onExpand(book.id)
+      return
+    }
+
     if (isReadable) {
       onSelect(book)
     }
   }
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (isReadable && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault()
       onSelect(book)
     }
   }
 
-  const handleDeleteClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleDeleteClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     onRequestDelete(book)
+  }
+
+  const handleReadButtonClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    if (isReadable) {
+      onSelect(book)
+    }
   }
 
   return (
     <div
       role="button"
       tabIndex={0}
+      data-book-spine="true"
+      data-expanded={isExpanded ? 'true' : 'false'}
       aria-label={book.title}
+      aria-expanded={isExpanded}
       title={book.title}
-      onClick={handleOpen}
+      onPointerDown={handlePointerDown}
+      onClick={handleCardClick}
       onKeyDown={handleKeyDown}
-      className={`book-stage group relative z-0 flex w-[54px] shrink-0 flex-col items-start pt-2 pb-0 text-left transition-all duration-300 ease-out hover:z-20 hover:w-[216px] focus-visible:z-20 focus-visible:w-[216px] focus-within:z-20 focus-within:w-[216px] focus-visible:outline-none ${
-        isReadable ? 'cursor-pointer' : 'cursor-default'
+      className={`book-stage relative flex shrink-0 flex-col items-start pt-2 pb-0 text-left transition-all duration-300 ease-out focus-visible:outline-none ${
+        isReadable || !isExpanded ? 'cursor-pointer' : 'cursor-default'
       }`}
     >
       {/* 3D Book Volume: 160x240 (2:3 bunko ratio) with 34px pure-white spine */}
@@ -69,7 +108,7 @@ export function BookSpine({ book, onSelect, onRequestDelete }: BookSpineProps) {
         </div>
 
         {/* Front Cover Face (2:3 ratio) */}
-        <div className="book-face-front absolute inset-0 overflow-hidden rounded-r-[3px] border border-zinc-200 bg-white shadow-[0_6px_14px_rgba(24,24,27,0.08)] transition-shadow duration-300 group-hover:border-zinc-300 group-hover:shadow-[0_22px_40px_rgba(24,24,27,0.18)] group-focus-visible:ring-2 group-focus-visible:ring-zinc-900">
+        <div className="book-face-front book-cover-card absolute inset-0 overflow-hidden rounded-r-[3px] border border-zinc-200 bg-white transition-all duration-300">
           {book.cover_url ? (
             <img
               src={book.cover_url}
@@ -119,20 +158,20 @@ export function BookSpine({ book, onSelect, onRequestDelete }: BookSpineProps) {
             </div>
           )}
 
-          {/* Minimalist translucent delete button (visible only on hover / focus) */}
+          {/* Minimalist translucent delete button (visible only when expanded / hovered) */}
           <button
             type="button"
             aria-label={`删除《${book.title}》`}
             title="删除书籍"
             onClick={handleDeleteClick}
             onKeyDown={(e) => e.stopPropagation()}
-            className="pointer-events-none absolute top-2 right-2 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-zinc-900/50 text-white/90 opacity-0 backdrop-blur-xs transition-all duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:bg-zinc-900/85 hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            className="book-delete-btn absolute top-2 right-2 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-zinc-900/55 text-white/95 backdrop-blur-xs transition-all duration-200 hover:bg-zinc-900/85 hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:h-7 sm:w-7"
           >
             <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
           </button>
 
-          {/* Hover info overlay: title, author, reading progress & chapter count */}
-          <div className="absolute inset-x-0 bottom-0 translate-y-1 bg-gradient-to-t from-zinc-950/95 via-zinc-950/84 to-transparent px-3 pt-11 pb-3 text-white opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100">
+          {/* Expanded / hover info overlay: title, author, reading progress & read CTA */}
+          <div className="book-overlay absolute inset-x-0 bottom-0 bg-gradient-to-t from-zinc-950/95 via-zinc-950/84 to-transparent px-3 pt-11 pb-3 text-white transition-all duration-300">
             <h3 className="line-clamp-2 text-xs font-semibold leading-snug tracking-tight">
               {book.title}
             </h3>
@@ -169,7 +208,16 @@ export function BookSpine({ book, onSelect, onRequestDelete }: BookSpineProps) {
                   <span className="rounded bg-white/15 px-1.5 py-0.5 text-zinc-100 backdrop-blur-xs">
                     共 {book.total_chapters} 章
                   </span>
-                  <span className="font-medium text-white">阅读 →</span>
+                  <button
+                    type="button"
+                    onClick={handleReadButtonClick}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    className={`rounded bg-white/15 px-2 py-0.5 font-medium text-white transition hover:bg-white/25 ${
+                      isExpanded ? 'pointer-events-auto cursor-pointer' : 'pointer-events-none'
+                    }`}
+                  >
+                    阅读 →
+                  </button>
                 </>
               ) : isParsing ? (
                 <span className="text-zinc-200">正在解析章节...</span>
@@ -195,10 +243,10 @@ export function BookSpine({ book, onSelect, onRequestDelete }: BookSpineProps) {
         />
       </div>
 
-      {/* Soft contact shadow that widens and deepens when the book turns forward */}
+      {/* Soft contact shadow that widens and deepens when expanded / hovered */}
       <div
         aria-hidden="true"
-        className="pointer-events-none -mt-1 ml-1 h-[7px] w-[48px] -skew-x-[24deg] rounded-full bg-zinc-900/12 blur-[4px] transition-all duration-300 ease-out group-hover:ml-7 group-hover:w-[156px] group-hover:skew-x-0 group-hover:bg-zinc-900/24 group-hover:blur-[8px] group-focus-within:ml-7 group-focus-within:w-[156px] group-focus-within:skew-x-0 group-focus-within:bg-zinc-900/24 group-focus-within:blur-[8px]"
+        className="book-shadow pointer-events-none -mt-1 h-[7px] rounded-full transition-all duration-300 ease-out"
       />
     </div>
   )

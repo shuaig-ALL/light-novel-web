@@ -197,6 +197,7 @@ export function ReaderView() {
   const [tocOpen, setTocOpen] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false)
+  const [chromeVisible, setChromeVisible] = useState(true)
   const [inlineLightbox, setInlineLightbox] = useState<{
     src: string
     alt: string | null
@@ -679,6 +680,10 @@ export function ReaderView() {
     }
   }, [])
 
+  const toggleChrome = useCallback(() => {
+    setChromeVisible((prev) => !prev)
+  }, [])
+
   // Keyboard shortcuts: Left / Right for page (paginated) or chapter (scroll), Esc to close TOC
   useEffect(() => {
     if (galleryOpen || aiDrawerOpen || inlineLightbox !== null) {
@@ -726,24 +731,36 @@ export function ReaderView() {
     paginatedInfo.currentPage < paginatedInfo.totalPages - 1 || chapter?.next_chapter_id,
   )
 
+  const showToolbars = !isPaginated || chromeVisible || tocOpen || galleryOpen || aiDrawerOpen
+
   return (
     <div
       className={`transition-colors duration-200 ${styles.page} ${
-        isPaginated ? 'flex h-screen flex-col overflow-hidden' : 'min-h-screen'
+        isPaginated
+          ? 'ln-paginated-viewport fixed inset-0 flex h-[100dvh] w-full flex-col overflow-hidden'
+          : 'pb-safe min-h-[100dvh]'
       }`}
     >
-      {/* Top Toolbar */}
+      {/* Top Toolbar (floating slide-in/out overlay in paginated mode for zero-jump fullscreen) */}
       <header
-        className={`z-30 shrink-0 border-b backdrop-blur-md transition-colors duration-200 ${
-          isPaginated ? '' : 'sticky top-0'
+        className={`pt-safe z-30 border-b backdrop-blur-md transition-all duration-250 ease-out ${
+          isPaginated
+            ? `fixed inset-x-0 top-0 ${
+                showToolbars
+                  ? 'translate-y-0 opacity-100'
+                  : 'pointer-events-none -translate-y-full opacity-0'
+              }`
+            : 'sticky top-0 shrink-0'
         } ${styles.bar}`}
       >
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-3 sm:gap-3 sm:px-6">
-          {/* Left: Back to shelf + TOC + optional Gallery */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* Row 1: Primary navigation, title, and desktop reading controls */}
+        <div className="mx-auto flex h-13 max-w-6xl items-center justify-between gap-2 px-3 sm:h-14 sm:gap-3 sm:px-6">
+          {/* Left: Back to shelf + TOC + optional Gallery + AI Assistant */}
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <Link
               to="/"
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${styles.button}`}
+              aria-label="返回书架"
+              className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition sm:h-auto sm:px-2.5 sm:py-1.5 ${styles.button}`}
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span className="hidden md:inline">返回书架</span>
@@ -752,10 +769,11 @@ export function ReaderView() {
             <button
               type="button"
               onClick={() => setTocOpen(true)}
-              className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${styles.button}`}
+              aria-label="打开目录"
+              className={`inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition sm:h-auto sm:px-2.5 sm:py-1.5 ${styles.button}`}
             >
               <List className="h-3.5 w-3.5" />
-              <span>目录</span>
+              <span className="hidden sm:inline">目录</span>
             </button>
 
             {user?.enable_gallery && (
@@ -764,7 +782,7 @@ export function ReaderView() {
                 onClick={() => setGalleryOpen(true)}
                 title="插画画廊"
                 aria-label="打开插画画廊"
-                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${styles.button}`}
+                className={`inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition sm:h-auto sm:px-2.5 sm:py-1.5 ${styles.button}`}
               >
                 <Images className="h-3.5 w-3.5" />
                 <span className="hidden md:inline">插画</span>
@@ -777,7 +795,7 @@ export function ReaderView() {
                 onClick={() => setAiDrawerOpen(true)}
                 title="防剧透 AI 助手"
                 aria-label="打开防剧透 AI 助手"
-                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${styles.button}`}
+                className={`inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition sm:h-auto sm:px-2.5 sm:py-1.5 ${styles.button}`}
               >
                 <Sparkles className="h-3.5 w-3.5" />
                 <span className="hidden md:inline">AI 助手</span>
@@ -786,20 +804,19 @@ export function ReaderView() {
           </div>
 
           {/* Center: Book & chapter title */}
-          <div className="min-w-0 flex-1 text-center">
-            <p className="truncate text-sm font-semibold">
+          <div className="min-w-0 flex-1 text-right sm:text-center">
+            <p className="truncate text-xs font-semibold sm:text-sm">
               {toc?.title || '加载中...'}
             </p>
             {chapter && (
-              <p className={`truncate text-[11px] ${styles.muted}`}>
+              <p className={`truncate text-[10px] sm:text-[11px] ${styles.muted}`}>
                 {chapter.title}
               </p>
             )}
           </div>
 
-          {/* Right: Reading mode switcher + Font size + Theme switcher */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* Reading mode switcher: Scroll / Slide / Flip */}
+          {/* Right (md+): Reading mode switcher + Font size + Theme switcher */}
+          <div className="hidden shrink-0 items-center gap-2 md:flex">
             <div
               role="group"
               aria-label="翻书方式"
@@ -815,7 +832,7 @@ export function ReaderView() {
                     aria-label={title}
                     aria-pressed={active}
                     onClick={() => handleChangeReadingMode(key)}
-                    className={`inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium transition sm:px-2 ${
+                    className={`inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition ${
                       active
                         ? theme === 'dark'
                           ? 'bg-amber-600 text-white shadow-xs'
@@ -830,8 +847,7 @@ export function ReaderView() {
               })}
             </div>
 
-            {/* Font size adjuster */}
-            <div className={`hidden items-center rounded-lg border md:flex ${styles.divider}`}>
+            <div className={`flex items-center rounded-lg border ${styles.divider}`}>
               <button
                 type="button"
                 aria-label="减小字号"
@@ -855,7 +871,6 @@ export function ReaderView() {
               </button>
             </div>
 
-            {/* Theme switcher: Pure White / Sepia / Dark */}
             <div className={`flex items-center rounded-lg border p-0.5 ${styles.divider}`}>
               {(
                 [
@@ -885,36 +900,102 @@ export function ReaderView() {
             </div>
           </div>
         </div>
-      </header>
 
-      {/* Mobile font-size quick bar */}
-      <div
-        className={`flex shrink-0 items-center justify-center gap-3 border-b py-1.5 text-xs md:hidden ${styles.divider}`}
-      >
-        <span className={styles.muted}>字号</span>
-        <button
-          type="button"
-          disabled={fontSize <= MIN_FONT_SIZE}
-          onClick={() => setFontSize((s) => Math.max(MIN_FONT_SIZE, s - 2))}
-          className={`rounded border px-2 py-0.5 ${styles.button} disabled:opacity-40`}
+        {/* Row 2 (mobile < md): Compact mode, font-size, and theme controls with zero overflow */}
+        <div
+          className={`flex items-center justify-between gap-2 border-t px-3 py-1.5 md:hidden ${styles.divider}`}
         >
-          A-
-        </button>
-        <span className="tabular-nums">{fontSize}px</span>
-        <button
-          type="button"
-          disabled={fontSize >= MAX_FONT_SIZE}
-          onClick={() => setFontSize((s) => Math.min(MAX_FONT_SIZE, s + 2))}
-          className={`rounded border px-2 py-0.5 ${styles.button} disabled:opacity-40`}
-        >
-          A+
-        </button>
-      </div>
+          {/* Reading mode switcher */}
+          <div
+            role="group"
+            aria-label="翻书方式"
+            className={`flex items-center rounded-lg border p-0.5 ${styles.divider}`}
+          >
+            {READING_MODE_OPTIONS.map(({ key, label, title, icon: Icon }) => {
+              const active = readingMode === key
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  title={title}
+                  aria-label={title}
+                  aria-pressed={active}
+                  onClick={() => handleChangeReadingMode(key)}
+                  className={`inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                    active
+                      ? theme === 'dark'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'bg-zinc-900 text-white shadow-xs'
+                      : 'opacity-70'
+                  }`}
+                >
+                  <Icon className="h-3 w-3" />
+                  <span>{label}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Font size controls */}
+          <div className={`flex items-center rounded-lg border ${styles.divider}`}>
+            <button
+              type="button"
+              aria-label="减小字号"
+              disabled={fontSize <= MIN_FONT_SIZE}
+              onClick={() => setFontSize((s) => Math.max(MIN_FONT_SIZE, s - 2))}
+              className="cursor-pointer px-2 py-1 text-xs opacity-80 disabled:opacity-30"
+            >
+              A-
+            </button>
+            <span className="min-w-[26px] text-center text-[11px] tabular-nums">
+              {fontSize}
+            </span>
+            <button
+              type="button"
+              aria-label="增大字号"
+              disabled={fontSize >= MAX_FONT_SIZE}
+              onClick={() => setFontSize((s) => Math.min(MAX_FONT_SIZE, s + 2))}
+              className="cursor-pointer px-2 py-1 text-xs opacity-80 disabled:opacity-30"
+            >
+              A+
+            </button>
+          </div>
+
+          {/* Theme switcher */}
+          <div className={`flex items-center rounded-lg border p-0.5 ${styles.divider}`}>
+            {(
+              [
+                { key: 'light', icon: Sun, title: '纯白主题' },
+                { key: 'sepia', icon: BookOpenText, title: '羊皮纸主题' },
+                { key: 'dark', icon: Moon, title: '暗夜主题' },
+              ] as const
+            ).map(({ key, icon: Icon, title }) => {
+              const active = theme === key
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  title={title}
+                  aria-label={title}
+                  onClick={() => setTheme(key)}
+                  className={`cursor-pointer rounded-md p-1.5 transition ${
+                    active
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'opacity-70'
+                  }`}
+                >
+                  <Icon className="h-3 w-3" />
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </header>
 
       {/* Main Reader Stage */}
       {isPaginated ? (
         <>
-          <main className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-5 py-5 sm:px-10 sm:py-6">
+          <main className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 pt-[calc(0.85rem+env(safe-area-inset-top))] pb-[calc(1.6rem+env(safe-area-inset-bottom))] sm:px-10 md:pt-[calc(4.5rem+env(safe-area-inset-top))] md:pb-[calc(3.75rem+env(safe-area-inset-bottom))]">
             {loadingToc ? (
               <div className="flex flex-1 flex-col items-center justify-center">
                 <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
@@ -970,18 +1051,35 @@ export function ReaderView() {
                   onUserPageTurn={handlePaginatedUserTurn}
                   onRequestPrevChapter={goPrevChapter}
                   onRequestNextChapter={goNextChapter}
+                  onToggleChrome={toggleChrome}
                   onImageClick={setInlineLightbox}
                 />
               </div>
             ) : null}
           </main>
 
-          {/* Compact Paginated Bottom Bar */}
+          {/* Subtle minimal page progress indicator when toolbars are hidden in fullscreen */}
+          {toc && chapter && !showToolbars && (
+            <div
+              aria-hidden="true"
+              className={`pb-safe pointer-events-none fixed inset-x-0 bottom-1 z-20 flex justify-center text-[10px] tabular-nums opacity-55 ${styles.muted}`}
+            >
+              <span>
+                {paginatedInfo.currentPage + 1} / {paginatedInfo.totalPages}
+              </span>
+            </div>
+          )}
+
+          {/* Floating Paginated Bottom Bar with iOS bottom safe-area inset */}
           {toc && chapter && (
             <footer
-              className={`shrink-0 border-t backdrop-blur-md transition-colors duration-200 ${styles.bar}`}
+              className={`pb-safe fixed inset-x-0 bottom-0 z-30 border-t backdrop-blur-md transition-all duration-250 ease-out ${
+                showToolbars
+                  ? 'translate-y-0 opacity-100'
+                  : 'pointer-events-none translate-y-full opacity-0'
+              } ${styles.bar}`}
             >
-              <div className="mx-auto flex h-12 max-w-3xl items-center justify-between gap-3 px-4 sm:px-10">
+              <div className="mx-auto flex h-12 max-w-3xl items-center justify-between gap-2 px-4 sm:px-10">
                 <button
                   type="button"
                   disabled={!canGoPrevPage || loadingChapter}
@@ -995,10 +1093,10 @@ export function ReaderView() {
                 <button
                   type="button"
                   onClick={() => setTocOpen(true)}
-                  className={`cursor-pointer text-xs tabular-nums transition hover:opacity-100 ${styles.muted}`}
+                  className={`cursor-pointer truncate text-xs tabular-nums transition hover:opacity-100 ${styles.muted}`}
                 >
-                  第 {paginatedInfo.currentPage + 1} / {paginatedInfo.totalPages} 页 ·
-                  第 {currentChapterPosition}/{toc.chapters.length} 章
+                  {paginatedInfo.currentPage + 1}/{paginatedInfo.totalPages} 页 ·
+                  {currentChapterPosition}/{toc.chapters.length} 章
                 </button>
 
                 <button
@@ -1123,38 +1221,40 @@ export function ReaderView() {
           />
 
           <aside
-            className={`relative z-10 flex h-full w-80 max-w-[85vw] flex-col border-r shadow-2xl ${styles.drawer}`}
+            className={`relative z-10 flex h-full w-full flex-col border-r shadow-2xl sm:w-80 ${styles.drawer}`}
           >
-            <div className={`flex items-start justify-between gap-3 border-b p-4 ${styles.divider}`}>
-              <div className="flex min-w-0 items-center gap-3">
-                {toc?.cover_url && (
-                  <img
-                    src={toc.cover_url}
-                    alt={toc.title}
-                    className="h-14 w-10 shrink-0 rounded object-cover shadow-xs"
-                  />
-                )}
-                <div className="min-w-0">
-                  <h2 className="line-clamp-2 text-sm font-bold leading-snug">
-                    {toc?.title}
-                  </h2>
-                  <p className={`mt-0.5 truncate text-xs ${styles.muted}`}>
-                    {toc?.author || '未知作者'} · 共 {toc?.chapters.length ?? 0} 章
-                  </p>
+            <div className={`pt-safe border-b ${styles.divider}`}>
+              <div className="flex items-start justify-between gap-3 p-4">
+                <div className="flex min-w-0 items-center gap-3">
+                  {toc?.cover_url && (
+                    <img
+                      src={toc.cover_url}
+                      alt={toc.title}
+                      className="h-14 w-10 shrink-0 rounded object-cover shadow-xs"
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <h2 className="line-clamp-2 text-sm font-bold leading-snug">
+                      {toc?.title}
+                    </h2>
+                    <p className={`mt-0.5 truncate text-xs ${styles.muted}`}>
+                      {toc?.author || '未知作者'} · 共 {toc?.chapters.length ?? 0} 章
+                    </p>
+                  </div>
                 </div>
-              </div>
 
-              <button
-                type="button"
-                aria-label="关闭目录"
-                onClick={() => setTocOpen(false)}
-                className="cursor-pointer rounded-lg p-1.5 opacity-70 transition hover:opacity-100"
-              >
-                <X className="h-4 w-4" />
-              </button>
+                <button
+                  type="button"
+                  aria-label="关闭目录"
+                  onClick={() => setTocOpen(false)}
+                  className="cursor-pointer rounded-lg p-1.5 opacity-70 transition hover:opacity-100"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto py-2">
+            <div className="pb-safe-4 flex-1 overflow-y-auto py-2">
               {toc?.chapters.map((item) => {
                 const isActive = item.id === activeChapterId
                 return (

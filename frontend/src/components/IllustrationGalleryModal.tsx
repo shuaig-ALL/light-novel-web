@@ -153,7 +153,7 @@ export function IllustrationGalleryModal({
       role="dialog"
       aria-modal="true"
       aria-label="插画画廊"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center sm:p-6"
     >
       {/* Backdrop */}
       <div
@@ -161,10 +161,11 @@ export function IllustrationGalleryModal({
         onClick={onClose}
       />
 
-      {/* Minimalist pure-white gallery container */}
-      <div className="relative z-10 flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-4 border-b border-zinc-100 px-5 py-4 sm:px-6">
+      {/* Minimalist pure-white gallery container (fullscreen on mobile, centered card on sm+) */}
+      <div className="relative z-10 flex h-[100dvh] w-full flex-col overflow-hidden bg-white text-zinc-900 shadow-2xl sm:h-auto sm:max-h-[88vh] sm:max-w-5xl sm:rounded-2xl sm:border sm:border-zinc-200">
+        {/* Header with iOS safe-area top inset */}
+        <div className="pt-safe border-b border-zinc-100">
+          <div className="flex items-center justify-between gap-4 px-4 py-3.5 sm:px-6 sm:py-4">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-zinc-900">
               <Images className="h-4.5 w-4.5" strokeWidth={1.75} />
@@ -193,10 +194,11 @@ export function IllustrationGalleryModal({
           >
             <X className="h-4 w-4" />
           </button>
+          </div>
         </div>
 
-        {/* Grid body */}
-        <div className="flex-1 overflow-y-auto p-5 sm:p-6">
+        {/* Grid body with iOS safe-area bottom inset */}
+        <div className="pb-safe-4 flex-1 overflow-y-auto px-4 pt-4 sm:p-6">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-24 text-zinc-400">
               <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
@@ -279,11 +281,12 @@ export function IllustrationGalleryModal({
           className="fixed inset-0 z-60 flex flex-col bg-zinc-950/92 text-white backdrop-blur-sm"
           onClick={() => setLightboxIndex(null)}
         >
-          {/* Top bar */}
+          {/* Top bar with iOS safe-area inset */}
           <div
-            className="flex items-center justify-between px-4 py-3.5 sm:px-6"
+            className="pt-safe"
             onClick={(e) => e.stopPropagation()}
           >
+            <div className="flex items-center justify-between px-4 py-3.5 sm:px-6">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-white">
                 {activeLightboxItem.chapter_title}
@@ -302,10 +305,11 @@ export function IllustrationGalleryModal({
             >
               <X className="h-4.5 w-4.5" />
             </button>
+            </div>
           </div>
 
           {/* Center image stage */}
-          <div className="relative flex flex-1 items-center justify-center overflow-hidden px-12 pb-6 sm:px-16">
+          <div className="pb-safe-4 relative flex flex-1 items-center justify-center overflow-hidden px-12 sm:px-16 sm:pb-6">
             {hasPrevLightbox && (
               <button
                 type="button"

@@ -32,23 +32,25 @@ export function InlineImageLightbox({
       onClick={onClose}
     >
       <div
-        className="flex items-center justify-between px-4 py-3.5 sm:px-6"
+        className="pt-safe"
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="truncate text-sm font-medium text-zinc-200">
-          {alt && alt !== 'illustration' ? alt : '正文插画预览'}
-        </p>
-        <button
-          type="button"
-          aria-label="关闭大图预览"
-          onClick={onClose}
-          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
-        >
-          <X className="h-4.5 w-4.5" />
-        </button>
+        <div className="flex items-center justify-between px-4 py-3.5 sm:px-6">
+          <p className="truncate text-sm font-medium text-zinc-200">
+            {alt && alt !== 'illustration' ? alt : '正文插画预览'}
+          </p>
+          <button
+            type="button"
+            aria-label="关闭大图预览"
+            onClick={onClose}
+            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+          >
+            <X className="h-4.5 w-4.5" />
+          </button>
+        </div>
       </div>
 
-      <div className="flex flex-1 items-center justify-center overflow-hidden px-4 pb-8 sm:px-10">
+      <div className="pb-safe-4 flex flex-1 items-center justify-center overflow-hidden px-4 sm:px-10 sm:pb-8">
         <img
           src={src}
           alt={alt || '插画大图'}
