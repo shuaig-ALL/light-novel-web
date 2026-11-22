@@ -27,6 +27,7 @@ export interface RegisterPayload {
 export interface LoginPayload {
   username: string
   password: string
+  remember_me?: boolean
 }
 
 export interface UserPreferencesPayload {

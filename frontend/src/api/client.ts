@@ -4,15 +4,25 @@ export const TOKEN_STORAGE_KEY = 'ln_access_token'
 export const UNAUTHORIZED_EVENT = 'ln:unauthorized'
 
 export function getStoredToken(): string | null {
-  return localStorage.getItem(TOKEN_STORAGE_KEY)
+  return (
+    localStorage.getItem(TOKEN_STORAGE_KEY) ||
+    sessionStorage.getItem(TOKEN_STORAGE_KEY)
+  )
 }
 
-export function setStoredToken(token: string): void {
-  localStorage.setItem(TOKEN_STORAGE_KEY, token)
+export function setStoredToken(token: string, rememberMe = true): void {
+  if (rememberMe) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token)
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY)
+  } else {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, token)
+    localStorage.removeItem(TOKEN_STORAGE_KEY)
+  }
 }
 
 export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_STORAGE_KEY)
+  sessionStorage.removeItem(TOKEN_STORAGE_KEY)
 }
 
 export const apiClient = axios.create({

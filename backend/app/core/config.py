@@ -33,6 +33,8 @@ JWT_ALGORITHM = "HS256"
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(
     os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 7))
 )
+JWT_REMEMBER_ME_EXPIRE_DAYS = int(os.getenv("JWT_REMEMBER_ME_EXPIRE_DAYS", "30"))
+JWT_SESSION_EXPIRE_HOURS = int(os.getenv("JWT_SESSION_EXPIRE_HOURS", "24"))
 
 # OpenAI-compatible LLM configuration for the spoiler-free reading assistant
 LLM_API_KEY = os.getenv("LLM_API_KEY", "").strip()

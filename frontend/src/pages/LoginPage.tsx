@@ -11,19 +11,29 @@ export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const redirectTo =
-    (location.state as { from?: string } | null)?.from || '/'
+  const rawFrom = (location.state as { from?: string } | null)?.from
+  const redirectTo = rawFrom && rawFrom !== '/login' ? rawFrom : '/'
 
   const [mode, setMode] = useState<AuthMode>('login')
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [rememberMe, setRememberMe] = useState(true)
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  if (!initializing && user) {
+  if (initializing) {
+    return (
+      <div className="pt-safe pb-safe flex min-h-[100dvh] flex-col items-center justify-center bg-white text-zinc-400">
+        <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+        <p className="mt-3 text-xs">正在验证登录状态...</p>
+      </div>
+    )
+  }
+
+  if (user) {
     return <Navigate to={redirectTo} replace />
   }
 
@@ -67,7 +77,11 @@ export function LoginPage() {
     setSubmitting(true)
     try {
       if (mode === 'login') {
-        await login({ username: trimmedUsername, password })
+        await login({
+          username: trimmedUsername,
+          password,
+          remember_me: rememberMe,
+        })
       } else {
         await register({
           username: trimmedUsername,
@@ -142,7 +156,12 @@ export function LoginPage() {
             </div>
           )}
 
-          <form noValidate onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+          <form
+            method="post"
+            noValidate
+            onSubmit={(e) => void handleSubmit(e)}
+            className="space-y-4"
+          >
             <div>
               <label
                 htmlFor="auth-username"
@@ -152,8 +171,12 @@ export function LoginPage() {
               </label>
               <input
                 id="auth-username"
+                name="username"
                 type="text"
                 autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder={mode === 'login' ? '输入用户名或邮箱' : '至少 2 个字符'}
@@ -171,8 +194,12 @@ export function LoginPage() {
                 </label>
                 <input
                   id="auth-email"
+                  name="email"
                   type="email"
                   autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@example.com"
@@ -191,6 +218,7 @@ export function LoginPage() {
               <div className="relative">
                 <input
                   id="auth-password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
                   autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                   value={password}
@@ -213,6 +241,28 @@ export function LoginPage() {
               </div>
             </div>
 
+            {mode === 'login' && (
+              <div className="flex items-center justify-between gap-2 pt-0.5">
+                <label
+                  htmlFor="auth-remember-me"
+                  className="inline-flex cursor-pointer items-center gap-2 py-1 text-xs text-zinc-600 select-none hover:text-zinc-900"
+                >
+                  <input
+                    id="auth-remember-me"
+                    name="remember_me"
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="h-4 w-4 cursor-pointer rounded border-zinc-300 accent-zinc-900 focus:ring-2 focus:ring-zinc-900/20 focus:outline-none"
+                  />
+                  <span>30 天内自动登录</span>
+                </label>
+                <span className="text-[11px] text-zinc-400">
+                  {rememberMe ? '长期保持登录' : '仅本次会话有效'}
+                </span>
+              </div>
+            )}
+
             {mode === 'register' && (
               <div>
                 <label
@@ -223,6 +273,7 @@ export function LoginPage() {
                 </label>
                 <input
                   id="auth-confirm-password"
+                  name="confirm-password"
                   type={showPassword ? 'text' : 'password'}
                   autoComplete="new-password"
                   value={confirmPassword}

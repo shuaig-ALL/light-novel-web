@@ -1,7 +1,13 @@
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import (
+    JWT_REMEMBER_ME_EXPIRE_DAYS,
+    JWT_SESSION_EXPIRE_HOURS,
+)
 from app.core.database import get_db
 from app.core.security import (
     create_access_token,
@@ -63,7 +69,10 @@ async def register(
     await db.commit()
     await db.refresh(user)
 
-    token = create_access_token(user.id)
+    token = create_access_token(
+        user.id,
+        expires_delta=timedelta(days=JWT_REMEMBER_ME_EXPIRE_DAYS),
+    )
     return TokenResponse(
         access_token=token,
         user=UserResponse.model_validate(user),
@@ -90,7 +99,12 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = create_access_token(user.id)
+    expires_delta = (
+        timedelta(days=JWT_REMEMBER_ME_EXPIRE_DAYS)
+        if payload.remember_me
+        else timedelta(hours=JWT_SESSION_EXPIRE_HOURS)
+    )
+    token = create_access_token(user.id, expires_delta=expires_delta)
     return TokenResponse(
         access_token=token,
         user=UserResponse.model_validate(user),

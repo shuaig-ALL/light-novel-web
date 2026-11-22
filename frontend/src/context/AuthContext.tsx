@@ -1,3 +1,4 @@
+import axios from 'axios'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   fetchCurrentUser,
@@ -34,8 +35,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(me)
         }
       })
-      .catch(() => {
-        clearStoredToken()
+      .catch((error) => {
+        if (
+          axios.isAxiosError(error) &&
+          (error.response?.status === 401 || error.response?.status === 403)
+        ) {
+          clearStoredToken()
+        }
         if (!cancelled) {
           setUser(null)
         }
@@ -60,15 +66,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = useCallback(async (payload: LoginPayload): Promise<UserInfo> => {
-    const res = await loginUser(payload)
-    setStoredToken(res.access_token)
+    const rememberMe = payload.remember_me ?? true
+    const res = await loginUser({ ...payload, remember_me: rememberMe })
+    setStoredToken(res.access_token, rememberMe)
     setUser(res.user)
     return res.user
   }, [])
 
   const register = useCallback(async (payload: RegisterPayload): Promise<UserInfo> => {
     const res = await registerUser(payload)
-    setStoredToken(res.access_token)
+    setStoredToken(res.access_token, true)
     setUser(res.user)
     return res.user
   }, [])
