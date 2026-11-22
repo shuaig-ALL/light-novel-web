@@ -83,13 +83,13 @@
 /* Touch / explicit expanded state & keyboard focus-within */
 .book-stage[data-expanded="true"],
 .book-stage:focus-within {
-  width: 216px;
+  width: 188px;
   z-index: 20;
 }
 
 .book-stage[data-expanded="true"] .book-3d,
 .book-stage:focus-within .book-3d {
-  transform: translateX(28px) rotateY(0deg) translateY(-10px);
+  transform: translateX(14px) rotateY(0deg) translateY(-10px);
 }
 
 .book-stage[data-expanded="true"] .book-cover-card,
@@ -112,7 +112,7 @@
 
 .book-stage[data-expanded="true"] .book-shadow,
 .book-stage:focus-within .book-shadow {
-  margin-left: 28px;
+  margin-left: 16px;
   width: 156px;
   transform: skewX(0deg);
   background-color: rgba(24, 24, 27, 0.24);
@@ -122,12 +122,12 @@
 /* Desktop fine-pointer hover expansion (prevents sticky :hover on iOS Safari) */
 @media (hover: hover) and (pointer: fine) {
   .book-stage:hover {
-    width: 216px;
+    width: 188px;
     z-index: 20;
   }
 
   .book-stage:hover .book-3d {
-    transform: translateX(28px) rotateY(0deg) translateY(-10px);
+    transform: translateX(14px) rotateY(0deg) translateY(-10px);
   }
 
   .book-stage:hover .book-cover-card {
@@ -146,7 +146,7 @@
   }
 
   .book-stage:hover .book-shadow {
-    margin-left: 28px;
+    margin-left: 16px;
     width: 156px;
     transform: skewX(0deg);
     background-color: rgba(24, 24, 27, 0.24);

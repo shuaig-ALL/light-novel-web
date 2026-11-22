@@ -12,25 +12,25 @@ interface BookShelfProps {
   onRequestUpload: () => void
 }
 
-const COLLAPSED_SLOT_PX = 56 // 54px spine slot + 2px gap
-const EXPAND_EXTRA_PX = 162  // 216px expanded - 54px collapsed
-const MAX_BOOKS_PER_ROW = 14
+const COLLAPSED_SLOT_PX = 56 // 54px spine slot + 2px flex gap
+const EXPAND_EXTRA_PX = 134 // 188px expanded width - 54px collapsed width (reserved once per row)
+const LAST_BOOK_OVERHANG_PX = 38 // rightmost book's angled 3D cover peek past its 54px slot
+const DESKTOP_PADDING_X_PX = 32 // sm:px-4 (16px left + 16px right)
+const MOBILE_PADDING_X_PX = 24 // px-3 (12px left + 12px right)
 
 function computeBooksPerRow(containerWidth: number): number {
   if (containerWidth <= 0) {
     return 5
   }
-  // On mobile portrait (<640px), wrap cleanly so collapsed rows never overflow horizontally
+  // Mobile portrait (<640px): fill width cleanly without horizontal overflow when collapsed
   if (containerWidth < 640) {
-    // Reserve ~44px for left/right shelf padding + rightmost angled cover peek
-    return Math.max(3, Math.floor((containerWidth - 44) / COLLAPSED_SLOT_PX))
+    const usable = containerWidth - MOBILE_PADDING_X_PX - LAST_BOOK_OVERHANG_PX
+    return Math.max(3, Math.floor(usable / COLLAPSED_SLOT_PX))
   }
-  // On tablet & desktop (>=640px), reserve room for 1 expanded book so hovering parts neighbors cleanly
-  const usable = containerWidth - 80 - EXPAND_EXTRA_PX
-  return Math.min(
-    MAX_BOOKS_PER_ROW,
-    Math.max(5, Math.floor(usable / COLLAPSED_SLOT_PX) + 1),
-  )
+  // Tablet & Desktop (>=640px): no artificial row cap; reserve room for 1 expanded book + last-book overhang
+  const usable =
+    containerWidth - DESKTOP_PADDING_X_PX - EXPAND_EXTRA_PX - LAST_BOOK_OVERHANG_PX
+  return Math.max(4, Math.floor(usable / COLLAPSED_SLOT_PX))
 }
 
 function chunkBooks(books: BookListItem[], size: number): BookListItem[][] {
@@ -53,8 +53,8 @@ export function BookShelf({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [booksPerRow, setBooksPerRow] = useState<number>(() =>
     typeof window !== 'undefined'
-      ? computeBooksPerRow(Math.min(window.innerWidth - 32, 1088))
-      : 6,
+      ? computeBooksPerRow(Math.min(window.innerWidth - 32, 1216))
+      : 10,
   )
 
   useEffect(() => {
@@ -118,8 +118,8 @@ export function BookShelf({
     <div ref={containerRef} className="space-y-10 sm:space-y-14">
       {shelfRows.map((row, rowIndex) => (
         <section key={rowIndex} aria-label={`书架第 ${rowIndex + 1} 层`}>
-          {/* Responsive multi-row shelf: overflows gently only if a touch-expanded book needs momentary glide */}
-          <div className="overflow-x-auto pt-7 pr-8 pb-1 pl-3 sm:pt-8 sm:pr-16 sm:pl-8">
+          {/* Desktop uses overflow-x-visible so rightmost hover expansion & 3D shadow never clip or create scrollbars */}
+          <div className="overflow-x-auto px-3 pt-7 pb-1 sm:overflow-x-visible sm:px-4 sm:pt-8">
             <div className="flex w-max flex-nowrap items-end gap-0.5">
               {row.map((book) => (
                 <BookSpine

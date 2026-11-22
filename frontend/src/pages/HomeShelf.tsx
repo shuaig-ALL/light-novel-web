@@ -382,7 +382,7 @@ export function HomeShelf() {
 
       {/* Minimalist pure-white top navigation bar with iOS safe-area top inset */}
       <header className="pt-safe sticky top-0 z-30 border-b border-zinc-100 bg-white/95 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-3 sm:h-16 sm:px-8">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-2 px-3 sm:h-16 sm:px-8">
           <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-900 sm:h-9 sm:w-9">
               <BookOpen className="h-4 w-4 sm:h-4.5 sm:w-4.5" strokeWidth={1.75} />
@@ -470,7 +470,7 @@ export function HomeShelf() {
       </header>
 
       {/* Main bookshelf container */}
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-10">
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-8 sm:py-10">
         {notice && (
           <div
             className={`mb-5 flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-xs sm:mb-6 sm:text-sm ${
