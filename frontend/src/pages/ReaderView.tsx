@@ -166,6 +166,22 @@ const SCROLL_SYNC_DEBOUNCE_MS = 1500
 const PAGE_SYNC_DEBOUNCE_MS = 450
 const CHROME_AUTO_HIDE_MS = 3500
 const SCROLL_HIDE_THRESHOLD_PX = 28
+const KEY_REPEAT_THROTTLE_SLIDE_MS = 340
+const KEY_REPEAT_THROTTLE_FLIP_MS = 450
+
+function getEditableElement(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof HTMLElement)) {
+    return null
+  }
+  const tag = target.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+    return target
+  }
+  if (target.isContentEditable) {
+    return target
+  }
+  return target.closest<HTMLElement>('[contenteditable="true"], [contenteditable=""]')
+}
 
 export function ReaderView() {
   const { user, updatePreferences } = useAuth()
@@ -193,6 +209,7 @@ export function ReaderView() {
   const chromeVisibleRef = useRef<boolean>(true)
   const gutterPointerDownRef = useRef<{ x: number; y: number } | null>(null)
   const mainEdgePointerDownRef = useRef<{ x: number; y: number } | null>(null)
+  const lastKeyboardTurnAtRef = useRef<number>(0)
 
   const [toc, setToc] = useState<BookTocResponse | null>(null)
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
@@ -846,34 +863,136 @@ export function ReaderView() {
     [toggleChrome],
   )
 
-  // Keyboard shortcuts: Left / Right for page (paginated) or chapter (scroll), Esc to close TOC
+  // Global PC keyboard shortcuts:
+  // - Escape: close topmost overlay in priority order (Lightbox -> Gallery -> blur input -> AI Drawer -> TOC -> Toolbars)
+  // - Slide/Flip mode: ArrowLeft / Shift+Space (prev page), ArrowRight / Space (next page) with repeat throttling
+  // - Scroll mode: ArrowLeft / ArrowRight (prev/next chapter); Space stays native browser scroll
   useEffect(() => {
-    if (galleryOpen || aiDrawerOpen || inlineLightbox !== null) {
-      return
-    }
     const onKeyDown = (event: KeyboardEvent) => {
-      const tag = (event.target as HTMLElement | null)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      // Never intercept IME composition or browser modifier combinations (e.g. Ctrl+C, Cmd+R, Alt+Left)
+      if (
+        event.isComposing ||
+        event.key === 'Process' ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.metaKey
+      ) {
+        return
+      }
 
-      if (event.key === 'Escape' && tocOpen) {
-        setTocOpen(false)
-      } else if (event.key === 'ArrowLeft' && !tocOpen) {
-        if (isPaginated) {
+      const editableEl =
+        getEditableElement(event.target) ?? getEditableElement(document.activeElement)
+
+      // Priority 1: Escape — close topmost panel or blur active input
+      if (event.key === 'Escape') {
+        if (event.shiftKey) {
+          return
+        }
+        if (inlineLightbox !== null) {
+          event.preventDefault()
+          setInlineLightbox(null)
+          return
+        }
+        if (galleryOpen) {
+          // Delegated to IllustrationGalleryModal (closes internal gallery lightbox first, then gallery)
+          return
+        }
+        if (editableEl) {
+          event.preventDefault()
+          editableEl.blur()
+          return
+        }
+        if (aiDrawerOpen) {
+          event.preventDefault()
+          setAiDrawerOpen(false)
+          return
+        }
+        if (tocOpen) {
+          event.preventDefault()
+          setTocOpen(false)
+          return
+        }
+        if (chromeVisibleRef.current) {
+          event.preventDefault()
+          setChromeVisible(false)
+        }
+        return
+      }
+
+      // Focus protection & overlay guard: never turn pages while typing or while any drawer/modal is open
+      if (editableEl || hasOverlayOpen) {
+        return
+      }
+
+      const isSpaceKey = event.key === ' ' || event.code === 'Space'
+      const isArrowLeft = event.key === 'ArrowLeft'
+      const isArrowRight = event.key === 'ArrowRight'
+
+      if (!isSpaceKey && !isArrowLeft && !isArrowRight) {
+        return
+      }
+
+      // Preserve Shift + ArrowLeft/ArrowRight for native text selection
+      if ((isArrowLeft || isArrowRight) && event.shiftKey) {
+        return
+      }
+
+      if (isPaginated) {
+        // Prevent browser scroll or accidental activation of a previously-focused toolbar button
+        event.preventDefault()
+        if (isSpaceKey && document.activeElement instanceof HTMLButtonElement) {
+          document.activeElement.blur()
+        }
+
+        if (loadingChapter) {
+          return
+        }
+
+        const now = Date.now()
+        const repeatThrottleMs =
+          readingMode === 'flip' ? KEY_REPEAT_THROTTLE_FLIP_MS : KEY_REPEAT_THROTTLE_SLIDE_MS
+        if (
+          event.repeat &&
+          (paginatedRef.current?.isAnimating() ||
+            now - lastKeyboardTurnAtRef.current < repeatThrottleMs)
+        ) {
+          return
+        }
+
+        lastKeyboardTurnAtRef.current = now
+        if (isArrowLeft || (isSpaceKey && event.shiftKey)) {
           paginatedRef.current?.prevPage()
         } else {
-          goPrevChapter()
-        }
-      } else if (event.key === 'ArrowRight' && !tocOpen) {
-        if (isPaginated) {
           paginatedRef.current?.nextPage()
-        } else {
-          goNextChapter()
         }
+        return
+      }
+
+      // Scroll mode: keep Space / Shift+Space as native browser scrolling; ArrowLeft / ArrowRight switch chapters
+      if (isSpaceKey || event.repeat || loadingChapter) {
+        return
+      }
+      if (isArrowLeft) {
+        goPrevChapter()
+      } else if (isArrowRight) {
+        goNextChapter()
       }
     }
+
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [galleryOpen, aiDrawerOpen, inlineLightbox, tocOpen, isPaginated, goPrevChapter, goNextChapter])
+  }, [
+    inlineLightbox,
+    galleryOpen,
+    aiDrawerOpen,
+    tocOpen,
+    hasOverlayOpen,
+    isPaginated,
+    readingMode,
+    loadingChapter,
+    goPrevChapter,
+    goNextChapter,
+  ])
 
   const currentReadOrderIndex = useMemo(() => {
     const activeOrder = chapter?.order_index ?? 0
@@ -1567,6 +1686,7 @@ export function ReaderView() {
           bookTitle={toc?.title || ''}
           currentReadOrderIndex={currentReadOrderIndex}
           hideUnread={user.hide_unread_illustrations}
+          keyboardEnabled={inlineLightbox === null}
           onClose={() => setGalleryOpen(false)}
         />
       )}
@@ -1579,6 +1699,7 @@ export function ReaderView() {
           chapterId={chapter.id}
           chapterOrderIndex={chapter.order_index}
           chapterTitle={chapter.title}
+          closeOnEscape={false}
           onClose={() => setAiDrawerOpen(false)}
         />
       )}
@@ -1588,6 +1709,7 @@ export function ReaderView() {
         <InlineImageLightbox
           src={inlineLightbox.src}
           alt={inlineLightbox.alt}
+          closeOnEscape={false}
           onClose={() => setInlineLightbox(null)}
         />
       )}

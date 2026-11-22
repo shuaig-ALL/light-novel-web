@@ -20,6 +20,7 @@ interface IllustrationGalleryModalProps {
   bookTitle: string
   currentReadOrderIndex: number
   hideUnread: boolean
+  keyboardEnabled?: boolean
   onClose: () => void
 }
 
@@ -28,6 +29,7 @@ export function IllustrationGalleryModal({
   bookTitle,
   currentReadOrderIndex,
   hideUnread,
+  keyboardEnabled = true,
   onClose,
 }: IllustrationGalleryModalProps) {
   const [data, setData] = useState<BookIllustrationsResponse | null>(null)
@@ -105,9 +107,23 @@ export function IllustrationGalleryModal({
   )
 
   useEffect(() => {
+    if (!keyboardEnabled) {
+      return
+    }
     const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.isComposing ||
+        event.key === 'Process' ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.metaKey ||
+        event.shiftKey
+      ) {
+        return
+      }
       if (event.key === 'Escape') {
         event.preventDefault()
+        event.stopImmediatePropagation()
         if (lightboxIndex !== null) {
           setLightboxIndex(null)
         } else {
@@ -124,7 +140,7 @@ export function IllustrationGalleryModal({
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [lightboxIndex, onClose, stepLightbox])
+  }, [keyboardEnabled, lightboxIndex, onClose, stepLightbox])
 
   const handleCardClick = (item: IllustrationItem, index: number) => {
     if (isSpoilerLocked(item, index)) {

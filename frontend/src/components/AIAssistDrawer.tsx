@@ -18,6 +18,7 @@ interface AIAssistDrawerProps {
   chapterId: number
   chapterOrderIndex: number
   chapterTitle: string
+  closeOnEscape?: boolean
   onClose: () => void
 }
 
@@ -37,6 +38,7 @@ export function AIAssistDrawer({
   chapterId,
   chapterOrderIndex,
   chapterTitle,
+  closeOnEscape = true,
   onClose,
 }: AIAssistDrawerProps) {
   const [entries, setEntries] = useState<AssistantEntry[]>([])
@@ -63,9 +65,22 @@ export function AIAssistDrawer({
     }
   }, [])
 
-  // Close drawer with Escape
+  // Close drawer with Escape (can be delegated to parent reader shortcut stack)
   useEffect(() => {
+    if (!closeOnEscape) {
+      return
+    }
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.isComposing ||
+        event.key === 'Process' ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.metaKey ||
+        event.shiftKey
+      ) {
+        return
+      }
       if (event.key === 'Escape') {
         event.preventDefault()
         onClose()
@@ -73,7 +88,7 @@ export function AIAssistDrawer({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  }, [closeOnEscape, onClose])
 
   // Keep latest streamed text visible
   useEffect(() => {

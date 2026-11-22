@@ -22,6 +22,7 @@ export interface PaginatedChapterHandle {
   nextPage: () => void
   prevPage: () => void
   getCurrentPercent: () => number
+  isAnimating: () => boolean
 }
 
 interface PaginatedChapterViewProps {
@@ -49,6 +50,8 @@ const SWIPE_THRESHOLD_PX = 42
 const SWIPE_HORIZONTAL_RATIO = 1.4
 const CLICK_DRAG_MAX_PX = 8
 const DESKTOP_GUTTER_MIN_WIDTH = 864
+const SLIDE_ANIMATION_MS = 320
+const FLIP_ANIMATION_MS = 430
 
 const LEAF_PAPER_STYLES: Record<'light' | 'sepia' | 'dark', string> = {
   light: 'bg-gradient-to-r from-stone-100 via-white to-stone-50 border-r border-stone-200',
@@ -201,6 +204,7 @@ export const PaginatedChapterView = forwardRef<
   )
   const pendingLastPageRef = useRef<boolean>(landing.type === 'last')
   const flipTimerRef = useRef<number | null>(null)
+  const slideAnimatingUntilRef = useRef<number>(0)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null)
   const lastSwipeAtRef = useRef<number>(0)
@@ -360,7 +364,7 @@ export const PaginatedChapterView = forwardRef<
       flipTimerRef.current = window.setTimeout(() => {
         setFlipAnim(null)
         flipTimerRef.current = null
-      }, 430)
+      }, FLIP_ANIMATION_MS)
     },
     [mode],
   )
@@ -371,6 +375,9 @@ export const PaginatedChapterView = forwardRef<
       const clamped = Math.min(totalPages - 1, Math.max(0, nextPage))
       const nextPercent = pageToPercent(clamped, totalPages)
       ratioRef.current = nextPercent
+      if (mode === 'slide') {
+        slideAnimatingUntilRef.current = Date.now() + SLIDE_ANIMATION_MS
+      }
       setPageState({
         chapterId: chapter.id,
         currentPage: clamped,
@@ -384,7 +391,7 @@ export const PaginatedChapterView = forwardRef<
       })
       onUserPageTurn(nextPercent)
     },
-    [chapter.id, totalPages, triggerFlipOverlay, onPageStateChange, onUserPageTurn],
+    [chapter.id, mode, totalPages, triggerFlipOverlay, onPageStateChange, onUserPageTurn],
   )
 
   const nextPage = useCallback(() => {
@@ -409,6 +416,8 @@ export const PaginatedChapterView = forwardRef<
       nextPage,
       prevPage,
       getCurrentPercent: () => pageToPercent(currentPage, totalPages),
+      isAnimating: () =>
+        flipTimerRef.current !== null || Date.now() < slideAnimatingUntilRef.current,
     }),
     [nextPage, prevPage, currentPage, totalPages],
   )

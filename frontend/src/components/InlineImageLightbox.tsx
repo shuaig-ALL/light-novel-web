@@ -4,16 +4,31 @@ import { useEffect } from 'react'
 interface InlineImageLightboxProps {
   src: string
   alt?: string | null
+  closeOnEscape?: boolean
   onClose: () => void
 }
 
 export function InlineImageLightbox({
   src,
   alt,
+  closeOnEscape = true,
   onClose,
 }: InlineImageLightboxProps) {
   useEffect(() => {
+    if (!closeOnEscape) {
+      return
+    }
     const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.isComposing ||
+        event.key === 'Process' ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.metaKey ||
+        event.shiftKey
+      ) {
+        return
+      }
       if (event.key === 'Escape') {
         event.preventDefault()
         onClose()
@@ -21,7 +36,7 @@ export function InlineImageLightbox({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  }, [closeOnEscape, onClose])
 
   return (
     <div
