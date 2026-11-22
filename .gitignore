@@ -1,41 +1,82 @@
+# ==============================================================================
+# 1. Environment variables & secrets (keep example templates)
+# ==============================================================================
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# ==============================================================================
+# 2. SQLite databases, WAL/SHM runtime files & local data mount directories
+# ==============================================================================
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
+/data/
+backend/data/
+
+# ==============================================================================
+# 3. Uploaded light novels, covers, illustrations & media storage
+# ==============================================================================
+storage/
+backend/storage/
+uploads/
+backend/uploads/
+*.epub
+!.gitkeep
+
+# ==============================================================================
+# 4. Dependencies, build artifacts, logs & OS/editor junk
+# ==============================================================================
 # Python
+__pycache__/
+*.py[cod]
+*$py.class
 .venv/
 venv/
 env/
 ENV/
-__pycache__/
-*.py[cod]
-*$py.class
 *.egg-info/
+*.egg
+.eggs/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 
-# Local storage & databases
-storage/
-backend/storage/
-*.db
-*.sqlite
-*.sqlite3
-*.db-journal
-*.db-wal
-*.db-shm
-
-# Node / Frontend
+# Node / Frontend / Vite / TypeScript
 node_modules/
 dist/
 dist-ssr/
+build/
 .vite/
+*.tsbuildinfo
+.eslintcache
 *.local
+
+# Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-
-# Environment variables
-.env
-.env.*
-!.env.example
+lerna-debug.log*
 
 # IDE / OS
 .vscode/*
@@ -43,3 +84,7 @@ pnpm-debug.log*
 .idea/
 .DS_Store
 Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
