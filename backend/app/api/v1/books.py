@@ -22,6 +22,8 @@ from app.schemas.book import (
     BookDeleteResponse,
     BookIllustrationsResponse,
     BookListItem,
+    BookReorderRequest,
+    BookReorderResponse,
     BookTocResponse,
     BookUploadResponse,
     ChapterDetailResponse,
@@ -171,6 +173,7 @@ async def list_books(
                 parse_status=book.parse_status,
                 parse_error=book.parse_error,
                 total_chapters=book.total_chapters,
+                sort_order=book.sort_order,
                 last_chapter_title=last_chapter_title if last_read_at is not None else None,
                 progress_percent=progress_percent,
                 last_read_at=last_read_at,
@@ -180,6 +183,47 @@ async def list_books(
         )
 
     return items
+
+
+@router.put("/reorder", response_model=BookReorderResponse)
+async def reorder_books(
+    payload: BookReorderRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BookReorderResponse:
+    # Preserve order while deduplicating any repeated IDs
+    requested_ids = list(dict.fromkeys(payload.book_ids))
+
+    result = await db.execute(
+        select(Book)
+        .where(Book.user_id == current_user.id)
+        .order_by(Book.sort_order.asc(), Book.created_at.desc(), Book.id.desc())
+    )
+    owned_books = list(result.scalars().all())
+    owned_map = {book.id: book for book in owned_books}
+
+    ordered_owned_ids = [book_id for book_id in requested_ids if book_id in owned_map]
+    if not ordered_owned_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="未找到可更新排序的书籍。",
+        )
+
+    # Append any owned books not included in payload (e.g., uploaded concurrently) after the ordered list
+    requested_set = set(ordered_owned_ids)
+    remaining_ids = [book.id for book in owned_books if book.id not in requested_set]
+    final_ids = ordered_owned_ids + remaining_ids
+
+    for index, book_id in enumerate(final_ids):
+        owned_map[book_id].sort_order = index
+
+    await db.commit()
+
+    return BookReorderResponse(
+        updated_count=len(final_ids),
+        book_ids=final_ids,
+        message="书架自定义排序已保存。",
+    )
 
 
 @router.get("/{book_id}/toc", response_model=BookTocResponse)

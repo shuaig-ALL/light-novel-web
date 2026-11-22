@@ -1,5 +1,7 @@
 import {
+  ArrowUpDown,
   BookOpen,
+  Check,
   Loader2,
   LogOut,
   RefreshCw,
@@ -20,23 +22,51 @@ import {
   type MouseEvent,
 } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { deleteBook, getBooks, uploadBook, type BookListItem } from '../api/books'
+import {
+  deleteBook,
+  getBooks,
+  reorderBooks,
+  uploadBook,
+  type BookListItem,
+} from '../api/books'
 import { getApiErrorMessage } from '../api/client'
+import { BookReorderDrawer } from '../components/BookReorderDrawer'
 import { BookShelf } from '../components/BookShelf'
 import { useAuth } from '../context/useAuth'
-
-type ShelfSortKey = 'recent_read' | 'recent_upload' | 'title'
+import {
+  DEFAULT_SORT_DIR_BY_KEY,
+  readSavedSortPrefs,
+  saveSortPrefs,
+  sortBooks,
+  type ShelfSortKey,
+  type ShelfSortPrefs,
+} from '../utils/bookSort'
 
 const SORT_OPTIONS: { key: ShelfSortKey; label: string }[] = [
   { key: 'recent_read', label: '最近阅读' },
   { key: 'recent_upload', label: '最近上传' },
   { key: 'title', label: '书名' },
+  { key: 'custom', label: '自定义' },
 ]
 
-function parseTimestamp(iso: string | null): number {
-  if (!iso) return 0
-  const parsed = Date.parse(iso)
-  return Number.isFinite(parsed) ? parsed : 0
+function applyLocalOrder(
+  list: BookListItem[],
+  orderedBookIds: number[],
+): BookListItem[] {
+  const indexMap = new Map<number, number>()
+  orderedBookIds.forEach((id, idx) => {
+    indexMap.set(id, idx)
+  })
+  let tailIndex = orderedBookIds.length
+  return list.map((book) => {
+    const nextOrder = indexMap.get(book.id)
+    if (nextOrder !== undefined) {
+      return { ...book, sort_order: nextOrder }
+    }
+    const fallbackOrder = tailIndex
+    tailIndex += 1
+    return { ...book, sort_order: fallbackOrder }
+  })
 }
 
 export function HomeShelf() {
@@ -56,7 +86,11 @@ export function HomeShelf() {
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [sortBy, setSortBy] = useState<ShelfSortKey>('recent_read')
+  const [sortPrefs, setSortPrefs] = useState<ShelfSortPrefs>(readSavedSortPrefs)
+  const [isDesktopReordering, setIsDesktopReordering] = useState(false)
+  const [mobileReorderOpen, setMobileReorderOpen] = useState(false)
+  const [savingOrder, setSavingOrder] = useState(false)
+  const [mobileReorderError, setMobileReorderError] = useState<string | null>(null)
 
   const [bookToDelete, setBookToDelete] = useState<BookListItem | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -65,7 +99,13 @@ export function HomeShelf() {
   const [prefsError, setPrefsError] = useState<string | null>(null)
   const [notice, setNotice] = useState<{ type: 'info' | 'error'; text: string } | null>(null)
 
+  const { sortBy, sortDir } = sortPrefs
   const uploading = uploadState !== null
+
+  // Persist sort option & direction to localStorage
+  useEffect(() => {
+    saveSortPrefs(sortPrefs)
+  }, [sortPrefs])
 
   const refreshBooks = useCallback(async (showSpinner = false) => {
     if (showSpinner) {
@@ -131,9 +171,14 @@ export function HomeShelf() {
     return () => window.clearInterval(timer)
   }, [hasPendingBooks, refreshBooks])
 
-  // Close delete confirmation, settings modal, or expanded touch book with Escape
+  // Close delete confirmation, settings modal, reorder mode, or expanded touch book with Escape
   useEffect(() => {
-    if (!bookToDelete && !settingsOpen && expandedBookId === null) {
+    if (
+      !bookToDelete &&
+      !settingsOpen &&
+      !isDesktopReordering &&
+      expandedBookId === null
+    ) {
       return
     }
     const onKeyDown = (event: KeyboardEvent) => {
@@ -142,6 +187,8 @@ export function HomeShelf() {
           setBookToDelete(null)
         } else if (settingsOpen) {
           setSettingsOpen(false)
+        } else if (isDesktopReordering) {
+          setIsDesktopReordering(false)
         } else if (expandedBookId !== null) {
           setExpandedBookId(null)
         }
@@ -149,7 +196,12 @@ export function HomeShelf() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [bookToDelete, deleting, settingsOpen, expandedBookId])
+  }, [bookToDelete, deleting, settingsOpen, isDesktopReordering, expandedBookId])
+
+  const customOrderedBooks = useMemo(
+    () => sortBooks(books, 'custom', 'asc'),
+    [books],
+  )
 
   const filteredAndSortedBooks = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase()
@@ -161,23 +213,94 @@ export function HomeShelf() {
         })
       : books
 
-    return [...matched].sort((a, b) => {
-      if (sortBy === 'title') {
-        return a.title.localeCompare(b.title, 'zh-CN')
+    return sortBooks(matched, sortBy, sortDir)
+  }, [books, searchQuery, sortBy, sortDir])
+
+  const handleSelectSort = (key: ShelfSortKey) => {
+    setExpandedBookId(null)
+    if (key !== 'custom') {
+      setIsDesktopReordering(false)
+    }
+    setSortPrefs((prev) => {
+      if (prev.sortBy === key) {
+        if (key === 'custom') {
+          return prev
+        }
+        return {
+          sortBy: key,
+          sortDir: prev.sortDir === 'asc' ? 'desc' : 'asc',
+        }
       }
-      if (sortBy === 'recent_upload') {
-        const diff = parseTimestamp(b.created_at) - parseTimestamp(a.created_at)
-        return diff !== 0 ? diff : b.id - a.id
+      return {
+        sortBy: key,
+        sortDir: DEFAULT_SORT_DIR_BY_KEY[key],
       }
-      const readA = parseTimestamp(a.last_read_at)
-      const readB = parseTimestamp(b.last_read_at)
-      if (readA !== readB) {
-        return readB - readA
-      }
-      const createdDiff = parseTimestamp(b.created_at) - parseTimestamp(a.created_at)
-      return createdDiff !== 0 ? createdDiff : b.id - a.id
     })
-  }, [books, searchQuery, sortBy])
+  }
+
+  const handleToggleReorderMode = () => {
+    if (books.length < 2) {
+      return
+    }
+    setExpandedBookId(null)
+    const useMobileDrawer =
+      window.innerWidth < 640 || window.matchMedia('(pointer: coarse)').matches
+    if (useMobileDrawer) {
+      setMobileReorderError(null)
+      setMobileReorderOpen(true)
+      return
+    }
+    setIsDesktopReordering((prev) => {
+      const next = !prev
+      if (next && searchQuery.trim()) {
+        setSearchQuery('')
+      }
+      return next
+    })
+  }
+
+  const handleDesktopReorderBooks = useCallback(
+    async (orderedBookIds: number[]) => {
+      const previousBooks = books
+      setBooks((prev) => applyLocalOrder(prev, orderedBookIds))
+      setSavingOrder(true)
+      try {
+        await reorderBooks(orderedBookIds)
+      } catch (error) {
+        setBooks(previousBooks)
+        setNotice({
+          type: 'error',
+          text: getApiErrorMessage(error, '保存自定义排序失败，请稍后重试'),
+        })
+      } finally {
+        setSavingOrder(false)
+      }
+    },
+    [books],
+  )
+
+  const handleMobileSaveReorder = useCallback(
+    async (orderedBookIds: number[]) => {
+      const previousBooks = books
+      setMobileReorderError(null)
+      setSavingOrder(true)
+      setBooks((prev) => applyLocalOrder(prev, orderedBookIds))
+      try {
+        await reorderBooks(orderedBookIds)
+        setMobileReorderOpen(false)
+        await refreshBooks(false)
+        setNotice({ type: 'info', text: '书架自定义顺序已保存。' })
+      } catch (error) {
+        setBooks(previousBooks)
+        setMobileReorderError(
+          getApiErrorMessage(error, '保存书架顺序失败，请稍后重试'),
+        )
+      } finally {
+        setSavingOrder(false)
+      }
+    },
+    [books, refreshBooks],
+  )
 
   const handleTogglePreference = async (
     key: 'enable_gallery' | 'hide_unread_illustrations',
@@ -296,6 +419,9 @@ export function HomeShelf() {
   }
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes('Files')) {
+      return
+    }
     event.preventDefault()
     dragCounterRef.current = 0
     setIsDraggingFiles(false)
@@ -500,12 +626,23 @@ export function HomeShelf() {
               </p>
               {books.length > 0 && (
                 <p className="mt-0.5 text-xs text-zinc-400">
-                  <span className="hidden sm:inline">
-                    悬停书本转正预览 · 支持直接拖入本地 .epub 文件
-                  </span>
-                  <span className="sm:hidden">
-                    轻点书脊展开封面 · 再点即可进入阅读
-                  </span>
+                  {isDesktopReordering ? (
+                    <span className="inline-flex items-center gap-1.5 font-medium text-zinc-700">
+                      {savingOrder && <Loader2 className="h-3 w-3 animate-spin" />}
+                      {savingOrder
+                        ? '正在保存自定义顺序...'
+                        : '直接拖动书架上的书本调整位置，松手即自动保存'}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="hidden sm:inline">
+                        悬停书本转正预览 · 支持直接拖入本地 .epub 文件
+                      </span>
+                      <span className="sm:hidden">
+                        轻点书脊展开封面 · 再点即可进入阅读
+                      </span>
+                    </>
+                  )}
                 </p>
               )}
             </div>
@@ -518,9 +655,9 @@ export function HomeShelf() {
           </div>
 
           {books.length > 0 && (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2.5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-2.5">
               {/* Minimalist search box (16px on mobile to prevent iOS Safari focus zoom) */}
-              <div className="relative w-full sm:w-56">
+              <div className="relative w-full sm:w-52">
                 <Search
                   className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400"
                   strokeWidth={1.75}
@@ -528,12 +665,13 @@ export function HomeShelf() {
                 <input
                   type="text"
                   value={searchQuery}
+                  disabled={isDesktopReordering}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="搜索书名或作者..."
+                  placeholder={isDesktopReordering ? '调整顺序中...' : '搜索书名或作者...'}
                   aria-label="搜索书名或作者"
-                  className="w-full rounded-lg border border-zinc-200 bg-white py-2 pr-8 pl-8 text-base text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none sm:py-1.5 sm:text-xs"
+                  className="w-full rounded-lg border border-zinc-200 bg-white py-2 pr-8 pl-8 text-base text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-900 focus:outline-none disabled:bg-zinc-50 disabled:text-zinc-400 sm:py-1.5 sm:text-xs"
                 />
-                {searchQuery && (
+                {searchQuery && !isDesktopReordering && (
                   <button
                     type="button"
                     aria-label="清空搜索"
@@ -545,30 +683,81 @@ export function HomeShelf() {
                 )}
               </div>
 
-              {/* Minimalist sort switcher (full-width 3-column bar on mobile portrait) */}
-              <div
-                role="group"
-                aria-label="书架排序方式"
-                className="grid w-full grid-cols-3 items-center rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 sm:inline-flex sm:w-auto"
-              >
-                {SORT_OPTIONS.map(({ key, label }) => {
-                  const active = sortBy === key
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => setSortBy(key)}
-                      className={`cursor-pointer rounded-md px-2.5 py-1.5 text-center text-xs font-medium transition sm:py-1 ${
-                        active
-                          ? 'bg-white text-zinc-900 shadow-xs'
-                          : 'text-zinc-500 hover:text-zinc-800'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  )
-                })}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                {/* Minimalist 4-way sort switcher with asc/desc indicator */}
+                <div
+                  role="group"
+                  aria-label="书架排序方式"
+                  className="grid w-full grid-cols-4 items-center rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 sm:inline-flex sm:w-auto"
+                >
+                  {SORT_OPTIONS.map(({ key, label }) => {
+                    const active = sortBy === key
+                    const showArrow = active && key !== 'custom'
+                    const dirHint =
+                      key === 'custom'
+                        ? '按自定义顺序展示'
+                        : active
+                          ? `当前${sortDir === 'asc' ? '升序' : '降序'}，再次点击切换方向`
+                          : `按${label}排序`
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        title={dirHint}
+                        aria-pressed={active}
+                        onClick={() => handleSelectSort(key)}
+                        className={`inline-flex cursor-pointer items-center justify-center gap-0.5 rounded-md px-1.5 py-1.5 text-center text-xs font-medium whitespace-nowrap transition sm:px-2.5 sm:py-1 ${
+                          active
+                            ? 'bg-white text-zinc-900 shadow-xs'
+                            : 'text-zinc-500 hover:text-zinc-800'
+                        }`}
+                      >
+                        <span>{label}</span>
+                        {showArrow && (
+                          <span
+                            aria-hidden="true"
+                            className="text-[10px] leading-none text-zinc-600"
+                          >
+                            {sortDir === 'asc' ? '↑' : '↓'}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* Custom sort reorder toggle (desktop inline drag / mobile bottom sheet) */}
+                {sortBy === 'custom' && (
+                  <button
+                    type="button"
+                    disabled={books.length < 2}
+                    title={
+                      books.length < 2
+                        ? '至少有 2 本书时可调整顺序'
+                        : isDesktopReordering
+                          ? '退出顺序调整'
+                          : '手动调整书架顺序'
+                    }
+                    onClick={handleToggleReorderMode}
+                    className={`inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:px-2.5 sm:py-1.5 ${
+                      isDesktopReordering
+                        ? 'border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800'
+                        : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900'
+                    }`}
+                  >
+                    {isDesktopReordering ? (
+                      <>
+                        <Check className="h-3.5 w-3.5" strokeWidth={2} />
+                        <span>完成排序</span>
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUpDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+                        <span>调整顺序</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -600,13 +789,26 @@ export function HomeShelf() {
           <BookShelf
             books={filteredAndSortedBooks}
             expandedBookId={expandedBookId}
+            isReordering={sortBy === 'custom' && isDesktopReordering}
             onExpandBook={setExpandedBookId}
             onSelectBook={handleSelectBook}
             onDeleteBook={setBookToDelete}
             onRequestUpload={triggerFilePicker}
+            onReorderBooks={(ids) => void handleDesktopReorderBooks(ids)}
           />
         )}
       </main>
+
+      {/* Mobile vertical drag/arrow reorder drawer */}
+      {mobileReorderOpen && (
+        <BookReorderDrawer
+          books={customOrderedBooks}
+          saving={savingOrder}
+          errorMsg={mobileReorderError}
+          onSave={handleMobileSaveReorder}
+          onClose={() => setMobileReorderOpen(false)}
+        />
+      )}
 
       {/* Fullscreen drag-and-drop EPUB upload overlay */}
       {isDraggingFiles && (

@@ -1,21 +1,44 @@
-import { AlertCircle, BookOpen, Loader2, Trash2 } from 'lucide-react'
-import { useEffect, useRef, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
+import { AlertCircle, BookOpen, GripVertical, Loader2, Trash2 } from 'lucide-react'
+import {
+  useEffect,
+  useRef,
+  type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+} from 'react'
 import type { BookListItem } from '../api/books'
 
 interface BookSpineProps {
   book: BookListItem
   isExpanded: boolean
+  isReordering?: boolean
+  orderNumber?: number
+  isDragging?: boolean
+  dropIndicator?: 'before' | 'after' | null
   onExpand: (bookId: number) => void
   onSelect: (book: BookListItem) => void
   onRequestDelete: (book: BookListItem) => void
+  onDragStartBook?: (bookId: number, event: DragEvent<HTMLDivElement>) => void
+  onDragOverBook?: (bookId: number, event: DragEvent<HTMLDivElement>) => void
+  onDropOnBook?: (bookId: number, event: DragEvent<HTMLDivElement>) => void
+  onDragEndBook?: () => void
 }
 
 export function BookSpine({
   book,
   isExpanded,
+  isReordering = false,
+  orderNumber,
+  isDragging = false,
+  dropIndicator = null,
   onExpand,
   onSelect,
   onRequestDelete,
+  onDragStartBook,
+  onDragOverBook,
+  onDropOnBook,
+  onDragEndBook,
 }: BookSpineProps) {
   const isParsing = book.parse_status === 'pending' || book.parse_status === 'processing'
   const isFailed = book.parse_status === 'failed'
@@ -46,6 +69,10 @@ export function BookSpine({
   const handleCardClick = (event: MouseEvent<HTMLDivElement>) => {
     event.stopPropagation()
 
+    if (isReordering) {
+      return
+    }
+
     const isTouchInteraction =
       lastPointerTypeRef.current === 'touch' ||
       lastPointerTypeRef.current === 'pen' ||
@@ -63,6 +90,9 @@ export function BookSpine({
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (isReordering) {
+      return
+    }
     if (isReadable && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault()
       onSelect(book)
@@ -86,22 +116,65 @@ export function BookSpine({
       ref={rootRef}
       role="button"
       tabIndex={0}
+      draggable={isReordering}
       data-book-spine="true"
-      data-expanded={isExpanded ? 'true' : 'false'}
-      aria-label={book.title}
-      aria-expanded={isExpanded}
-      title={book.title}
+      data-expanded={isExpanded && !isReordering ? 'true' : 'false'}
+      data-reordering={isReordering ? 'true' : 'false'}
+      aria-label={isReordering ? `拖动调整《${book.title}》的顺序` : book.title}
+      aria-expanded={isExpanded && !isReordering}
+      title={isReordering ? `按住拖动调整《${book.title}》的位置` : book.title}
       onPointerDown={handlePointerDown}
       onClick={handleCardClick}
       onKeyDown={handleKeyDown}
+      onDragStart={isReordering ? (e) => onDragStartBook?.(book.id, e) : undefined}
+      onDragOver={isReordering ? (e) => onDragOverBook?.(book.id, e) : undefined}
+      onDrop={isReordering ? (e) => onDropOnBook?.(book.id, e) : undefined}
+      onDragEnd={isReordering ? () => onDragEndBook?.() : undefined}
       className={`book-stage relative flex shrink-0 flex-col items-start pt-2 pb-0 text-left transition-all duration-300 ease-out focus-visible:outline-none ${
-        isReadable || !isExpanded ? 'cursor-pointer' : 'cursor-default'
-      }`}
+        isReordering
+          ? 'cursor-grab active:cursor-grabbing'
+          : isReadable || !isExpanded
+            ? 'cursor-pointer'
+            : 'cursor-default'
+      } ${isDragging ? 'scale-[0.97] opacity-35' : ''}`}
     >
+      {/* Clear vertical insertion bar highlighting target drop slot in PC reorder mode */}
+      {isReordering && dropIndicator && (
+        <div
+          aria-hidden="true"
+          className={`pointer-events-none absolute top-1 bottom-1 z-30 flex flex-col items-center justify-between ${
+            dropIndicator === 'before' ? '-left-[3px]' : '-right-[3px]'
+          }`}
+        >
+          <span className="h-2 w-2 rounded-full bg-zinc-900 shadow-xs" />
+          <span className="w-[3px] flex-1 rounded-full bg-zinc-900 shadow-[0_0_10px_rgba(24,24,27,0.45)]" />
+          <span className="h-2 w-2 rounded-full bg-zinc-900 shadow-xs" />
+        </div>
+      )}
+
+      {/* Reorder mode order badge & subtle grip cue above spine */}
+      {isReordering && typeof orderNumber === 'number' && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-5 left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 shadow-xs tabular-nums"
+        >
+          <GripVertical className="h-2.5 w-2.5 text-zinc-400" strokeWidth={2} />
+          <span>{orderNumber}</span>
+        </div>
+      )}
+
       {/* 3D Book Volume: 160x240 (2:3 bunko ratio) with 34px pure-white spine */}
       <div className="book-3d pointer-events-none relative h-[240px] w-[160px]">
         {/* Left Spine Face (34px wide, pure white, vertical charcoal title) */}
-        <div className="book-face-spine absolute top-0 left-0 flex h-full w-[34px] flex-col items-center justify-between overflow-hidden rounded-l-[2px] border border-zinc-200 bg-white px-1 py-3 shadow-[inset_-2px_0_4px_rgba(24,24,27,0.05)]">
+        <div
+          className={`book-face-spine absolute top-0 left-0 flex h-full w-[34px] flex-col items-center justify-between overflow-hidden rounded-l-[2px] border bg-white px-1 py-3 shadow-[inset_-2px_0_4px_rgba(24,24,27,0.05)] transition-colors ${
+            dropIndicator
+              ? 'border-zinc-900 bg-zinc-50'
+              : isReordering
+                ? 'border-zinc-300'
+                : 'border-zinc-200'
+          }`}
+        >
           <span className="block h-px w-4 shrink-0 bg-zinc-200" />
 
           <div className="flex max-h-[178px] flex-1 items-center justify-center overflow-hidden py-1.5">

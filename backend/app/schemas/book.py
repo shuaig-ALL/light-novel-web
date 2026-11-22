@@ -25,6 +25,7 @@ class BookListItem(BaseModel):
     parse_status: str
     parse_error: str | None = None
     total_chapters: int
+    sort_order: int = 0
     last_chapter_title: str | None = None
     progress_percent: float | None = None
     last_read_at: datetime | None = None
@@ -68,6 +69,16 @@ class ChapterDetailResponse(BaseModel):
 class BookDeleteResponse(BaseModel):
     id: int
     title: str
+    message: str
+
+
+class BookReorderRequest(BaseModel):
+    book_ids: list[int] = Field(..., min_length=1)
+
+
+class BookReorderResponse(BaseModel):
+    updated_count: int
+    book_ids: list[int]
     message: str
 
 

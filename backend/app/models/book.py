@@ -33,6 +33,7 @@ class Book(Base):
     )
     parse_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     total_chapters: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

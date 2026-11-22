@@ -65,6 +65,22 @@ def _ensure_user_preference_columns(sync_conn) -> None:
         )
 
 
+def _ensure_book_sort_order_column(sync_conn) -> None:
+    """Non-destructive SQLite schema upgrade adding books.sort_order for existing databases."""
+    rows = sync_conn.execute(text("PRAGMA table_info(books)")).fetchall()
+    existing_cols = {row[1] for row in rows}
+    if not existing_cols:
+        return
+
+    if "sort_order" not in existing_cols:
+        sync_conn.execute(
+            text("ALTER TABLE books ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        )
+    sync_conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_books_sort_order ON books (sort_order)")
+    )
+
+
 async def init_db() -> None:
     # Ensure all ORM models are registered on Base.metadata before creating tables.
     import app.models.book  # noqa: F401
@@ -74,3 +90,4 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_user_preference_columns)
+        await conn.run_sync(_ensure_book_sort_order_column)

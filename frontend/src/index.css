@@ -154,6 +154,45 @@
   }
 }
 
+/* Reorder mode: keep compact spine slots stable during drag-and-drop without hover expansion shifts */
+.book-stage[data-reordering="true"],
+.book-stage[data-reordering="true"]:hover,
+.book-stage[data-reordering="true"]:focus-within {
+  width: 54px;
+  z-index: 10;
+}
+
+.book-stage[data-reordering="true"] .book-3d,
+.book-stage[data-reordering="true"]:focus-within .book-3d {
+  transform: translateX(18px) rotateY(68deg);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .book-stage[data-reordering="true"]:hover .book-3d {
+    transform: translateX(18px) rotateY(64deg) translateY(-6px);
+  }
+}
+
+.book-stage[data-reordering="true"] .book-overlay,
+.book-stage[data-reordering="true"]:hover .book-overlay,
+.book-stage[data-reordering="true"]:focus-within .book-overlay,
+.book-stage[data-reordering="true"] .book-delete-btn,
+.book-stage[data-reordering="true"]:hover .book-delete-btn,
+.book-stage[data-reordering="true"]:focus-within .book-delete-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.book-stage[data-reordering="true"] .book-shadow,
+.book-stage[data-reordering="true"]:hover .book-shadow,
+.book-stage[data-reordering="true"]:focus-within .book-shadow {
+  margin-left: 4px;
+  width: 48px;
+  transform: skewX(-24deg);
+  background-color: rgba(24, 24, 27, 0.14);
+  filter: blur(4px);
+}
+
 .book-face-front {
   transform: translateZ(17px);
   backface-visibility: hidden;

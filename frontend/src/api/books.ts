@@ -24,6 +24,7 @@ export interface BookListItem {
   parse_status: ParseStatus
   parse_error: string | null
   total_chapters: number
+  sort_order: number
   last_chapter_title: string | null
   progress_percent: number | null
   last_read_at: string | null
@@ -63,6 +64,12 @@ export interface ChapterDetailResponse {
 export interface BookDeleteResponse {
   id: number
   title: string
+  message: string
+}
+
+export interface BookReorderResponse {
+  updated_count: number
+  book_ids: number[]
   message: string
 }
 
@@ -155,6 +162,13 @@ export async function getChapterDetail(
 
 export async function deleteBook(bookId: number): Promise<BookDeleteResponse> {
   const { data } = await apiClient.delete<BookDeleteResponse>(`/books/${bookId}`)
+  return data
+}
+
+export async function reorderBooks(bookIds: number[]): Promise<BookReorderResponse> {
+  const { data } = await apiClient.put<BookReorderResponse>('/books/reorder', {
+    book_ids: bookIds,
+  })
   return data
 }
 
