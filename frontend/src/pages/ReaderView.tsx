@@ -168,6 +168,9 @@ const CHROME_AUTO_HIDE_MS = 3500
 const SCROLL_HIDE_THRESHOLD_PX = 28
 const KEY_REPEAT_THROTTLE_SLIDE_MS = 340
 const KEY_REPEAT_THROTTLE_FLIP_MS = 450
+const WHEEL_DELTA_THRESHOLD = 20
+const WHEEL_COOLDOWN_SLIDE_MS = 400
+const WHEEL_COOLDOWN_FLIP_MS = 440
 
 function getEditableElement(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof HTMLElement)) {
@@ -181,6 +184,35 @@ function getEditableElement(target: EventTarget | null): HTMLElement | null {
     return target
   }
   return target.closest<HTMLElement>('[contenteditable="true"], [contenteditable=""]')
+}
+
+function normalizeWheelDelta(delta: number, deltaMode: number): number {
+  if (deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    return delta * 16
+  }
+  if (deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    return delta * (window.innerHeight || 800)
+  }
+  return delta
+}
+
+function hasScrollableAncestor(
+  target: EventTarget | null,
+  boundary: HTMLElement | null,
+): boolean {
+  let node = target instanceof HTMLElement ? target : null
+  while (node && node !== boundary) {
+    const style = window.getComputedStyle(node)
+    const overflowY = style.overflowY
+    if (
+      (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') &&
+      node.scrollHeight > node.clientHeight + 1
+    ) {
+      return true
+    }
+    node = node.parentElement
+  }
+  return false
 }
 
 export function ReaderView() {
@@ -197,6 +229,7 @@ export function ReaderView() {
     Number(searchParams.get('chapter')) || null,
   )
   const articleRef = useRef<HTMLElement | null>(null)
+  const paginatedStageRef = useRef<HTMLDivElement | null>(null)
   const paginatedRef = useRef<PaginatedChapterHandle | null>(null)
   const pendingScrollRestoreRef = useRef<{ chapterId: number; percent: number } | null>(null)
   const shouldScrollTopOnNextChapterRef = useRef<boolean>(false)
@@ -210,6 +243,7 @@ export function ReaderView() {
   const gutterPointerDownRef = useRef<{ x: number; y: number } | null>(null)
   const mainEdgePointerDownRef = useRef<{ x: number; y: number } | null>(null)
   const lastKeyboardTurnAtRef = useRef<number>(0)
+  const wheelLockedUntilRef = useRef<number>(0)
 
   const [toc, setToc] = useState<BookTocResponse | null>(null)
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
@@ -1012,6 +1046,89 @@ export function ReaderView() {
     paginatedInfo.currentPage < paginatedInfo.totalPages - 1 || chapter?.next_chapter_id,
   )
 
+  // PC mouse wheel / trackpad page turning in slide & flip modes (Leading Throttle + Cooldown Lock)
+  useEffect(() => {
+    if (!isPaginated) {
+      return
+    }
+    const stageEl = paginatedStageRef.current
+    if (!stageEl) {
+      return
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      // Preserve native browser pinch/Ctrl/Cmd zoom
+      if (event.ctrlKey || event.metaKey) {
+        return
+      }
+      // Do not intercept while any drawer, modal, or lightbox is open
+      if (hasOverlayOpen) {
+        return
+      }
+      // Do not intercept when wheel target is inside a dialog/drawer/toolbar or any inner scrollable container
+      const targetEl = event.target instanceof HTMLElement ? event.target : null
+      if (
+        targetEl?.closest('[role="dialog"], aside, header, footer') ||
+        hasScrollableAncestor(targetEl, stageEl)
+      ) {
+        return
+      }
+
+      const deltaY = normalizeWheelDelta(event.deltaY, event.deltaMode)
+      const deltaX = normalizeWheelDelta(event.deltaX, event.deltaMode)
+
+      // Ignore pure/dominant horizontal gestures and tiny accidental trackpad jitter
+      if (Math.abs(deltaY) < Math.abs(deltaX)) {
+        return
+      }
+      if (Math.abs(deltaY) < WHEEL_DELTA_THRESHOLD) {
+        return
+      }
+
+      // Prevent unwanted page wobble / rubber-band bounce on the fixed paginated stage
+      event.preventDefault()
+
+      if (!chapter || loadingToc || loadingChapter) {
+        return
+      }
+
+      const now = Date.now()
+      // Leading throttle + cooldown lock: ignore inertia tail & rapid wheel spins during cooldown/animation
+      if (now < wheelLockedUntilRef.current || paginatedRef.current?.isAnimating()) {
+        return
+      }
+
+      const cooldownMs =
+        readingMode === 'flip' ? WHEEL_COOLDOWN_FLIP_MS : WHEEL_COOLDOWN_SLIDE_MS
+
+      if (deltaY > 0) {
+        if (!canGoNextPage) {
+          return
+        }
+        wheelLockedUntilRef.current = now + cooldownMs
+        paginatedRef.current?.nextPage()
+      } else {
+        if (!canGoPrevPage) {
+          return
+        }
+        wheelLockedUntilRef.current = now + cooldownMs
+        paginatedRef.current?.prevPage()
+      }
+    }
+
+    stageEl.addEventListener('wheel', onWheel, { passive: false })
+    return () => stageEl.removeEventListener('wheel', onWheel)
+  }, [
+    isPaginated,
+    readingMode,
+    hasOverlayOpen,
+    chapter,
+    loadingToc,
+    loadingChapter,
+    canGoPrevPage,
+    canGoNextPage,
+  ])
+
   const showToolbars =
     chromeVisible ||
     tocOpen ||
@@ -1287,7 +1404,7 @@ export function ReaderView() {
       {/* Main Reader Stage */}
       {isPaginated ? (
         <>
-          <div className="flex min-h-0 w-full flex-1 items-stretch">
+          <div ref={paginatedStageRef} className="flex min-h-0 w-full flex-1 items-stretch">
             {/* PC Wide-Screen Left Blank Margin: click to go to previous page */}
             <div
               role="button"
