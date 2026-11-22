@@ -23,6 +23,7 @@ import {
   useRef,
   useState,
   type MouseEvent,
+  type PointerEvent,
 } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import type { ReadingMode } from '../api/auth'
@@ -190,6 +191,8 @@ export function ReaderView() {
   const lastSyncedRef = useRef<{ chapterId: number; scrollPercent: number } | null>(null)
   const scrollChromeAnchorYRef = useRef<number>(0)
   const chromeVisibleRef = useRef<boolean>(true)
+  const gutterPointerDownRef = useRef<{ x: number; y: number } | null>(null)
+  const mainEdgePointerDownRef = useRef<{ x: number; y: number } | null>(null)
 
   const [toc, setToc] = useState<BookTocResponse | null>(null)
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
@@ -631,19 +634,25 @@ export function ReaderView() {
   )
 
   const goPrevChapter = useCallback(() => {
+    if (loadingChapter) {
+      return
+    }
     if (chapter?.prev_chapter_id) {
       selectChapter(
         chapter.prev_chapter_id,
         isPaginated ? { type: 'last' } : { type: 'first' },
       )
     }
-  }, [chapter, isPaginated, selectChapter])
+  }, [chapter, isPaginated, loadingChapter, selectChapter])
 
   const goNextChapter = useCallback(() => {
+    if (loadingChapter) {
+      return
+    }
     if (chapter?.next_chapter_id) {
       selectChapter(chapter.next_chapter_id, { type: 'first' })
     }
-  }, [chapter, selectChapter])
+  }, [chapter, loadingChapter, selectChapter])
 
   const handlePaginatedStateChange = useCallback(
     (state: { currentPage: number; totalPages: number; percent: number }) => {
@@ -725,6 +734,79 @@ export function ReaderView() {
     })
     setChromeActivityTick((tick) => tick + 1)
   }, [])
+
+  const handleGutterPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (event.isPrimary && (event.pointerType !== 'mouse' || event.button === 0)) {
+      gutterPointerDownRef.current = { x: event.clientX, y: event.clientY }
+    }
+  }, [])
+
+  const handleDesktopGutterClick = useCallback(
+    (direction: 'prev' | 'next', event: MouseEvent<HTMLDivElement>) => {
+      const down = gutterPointerDownRef.current
+      gutterPointerDownRef.current = null
+      // Ignore if pointer did not start in gutter or moved > 8px (e.g. text-selection drag release)
+      if (!down || Math.hypot(event.clientX - down.x, event.clientY - down.y) > 8) {
+        return
+      }
+      const selection = window.getSelection()
+      if (selection && selection.toString().trim().length > 0) {
+        return
+      }
+      if (loadingChapter || hasOverlayOpen) {
+        return
+      }
+      if (direction === 'prev') {
+        paginatedRef.current?.prevPage()
+      } else {
+        paginatedRef.current?.nextPage()
+      }
+    },
+    [loadingChapter, hasOverlayOpen],
+  )
+
+  const handlePaginatedMainPointerDown = useCallback((event: PointerEvent<HTMLElement>) => {
+    if (
+      event.target === event.currentTarget &&
+      event.isPrimary &&
+      (event.pointerType !== 'mouse' || event.button === 0)
+    ) {
+      mainEdgePointerDownRef.current = { x: event.clientX, y: event.clientY }
+    }
+  }, [])
+
+  const handlePaginatedMainEdgeClick = useCallback(
+    (event: MouseEvent<HTMLElement>) => {
+      // Only handle direct taps on the narrow mobile left/right/top/bottom padding strips outside PaginatedChapterView
+      if (event.target !== event.currentTarget) {
+        return
+      }
+      const down = mainEdgePointerDownRef.current
+      mainEdgePointerDownRef.current = null
+      if (!down || Math.hypot(event.clientX - down.x, event.clientY - down.y) > 8) {
+        return
+      }
+      if (window.innerWidth >= 864 && window.matchMedia('(pointer: fine)').matches) {
+        return
+      }
+      if (loadingChapter || hasOverlayOpen) {
+        return
+      }
+      const selection = window.getSelection()
+      if (selection && selection.toString().trim().length > 0) {
+        return
+      }
+      const relX = event.clientX / window.innerWidth
+      if (relX < 0.3) {
+        paginatedRef.current?.prevPage()
+      } else if (relX > 0.7) {
+        paginatedRef.current?.nextPage()
+      } else {
+        toggleChrome()
+      }
+    },
+    [loadingChapter, hasOverlayOpen, toggleChrome],
+  )
 
   const handleScrollStageClick = useCallback(
     (event: MouseEvent<HTMLElement>) => {
@@ -1086,68 +1168,126 @@ export function ReaderView() {
       {/* Main Reader Stage */}
       {isPaginated ? (
         <>
-          <main className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 pt-[calc(0.85rem+env(safe-area-inset-top))] pb-[calc(1.6rem+env(safe-area-inset-bottom))] sm:px-10 md:pt-[calc(4.5rem+env(safe-area-inset-top))] md:pb-[calc(3.75rem+env(safe-area-inset-bottom))]">
-            {loadingToc ? (
-              <div className="flex flex-1 flex-col items-center justify-center">
-                <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
-                <p className={`mt-3 text-sm ${styles.muted}`}>正在打开书籍...</p>
-              </div>
-            ) : displayError ? (
-              <div className="my-auto rounded-2xl border border-rose-300/60 bg-rose-500/10 p-8 text-center">
-                <p className="text-sm font-medium text-rose-600 dark:text-rose-400">
-                  {displayError}
-                </p>
-                <Link
-                  to="/"
-                  className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white"
+          <div className="flex min-h-0 w-full flex-1 items-stretch">
+            {/* PC Wide-Screen Left Blank Margin: click to go to previous page */}
+            <div
+              role="button"
+              tabIndex={-1}
+              aria-label={paginatedInfo.currentPage === 0 ? '上一章' : '上一页'}
+              title={canGoPrevPage && !loadingChapter ? (paginatedInfo.currentPage === 0 ? '上一章' : '上一页') : undefined}
+              onPointerDown={handleGutterPointerDown}
+              onClick={(e) => canGoPrevPage && handleDesktopGutterClick('prev', e)}
+              className={`group hidden min-w-[48px] flex-1 items-center justify-end pr-6 select-none min-[864px]:flex ${
+                canGoPrevPage && !loadingChapter ? 'cursor-pointer' : 'cursor-default'
+              }`}
+            >
+              {canGoPrevPage && !loadingChapter && (
+                <span
+                  aria-hidden="true"
+                  className="flex h-11 w-11 items-center justify-center rounded-full opacity-0 transition-all duration-200 group-hover:bg-current/5 group-hover:opacity-45"
                 >
-                  返回书架
-                </Link>
-              </div>
-            ) : !toc || toc.chapters.length === 0 ? (
-              <div className="my-auto text-center">
-                <p className={`text-sm ${styles.muted}`}>
-                  {toc?.parse_status === 'completed'
-                    ? '这本书暂未提取到可阅读章节。'
-                    : '这本书尚未解析完成，请稍后返回书架查看。'}
-                </p>
-                <Link
-                  to="/"
-                  className={`mt-5 inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-medium ${styles.button}`}
+                  <ChevronLeft className="h-6 w-6" strokeWidth={1.5} />
+                </span>
+              )}
+            </div>
+
+            <main
+              onPointerDown={handlePaginatedMainPointerDown}
+              onClick={handlePaginatedMainEdgeClick}
+              className="mx-auto flex min-h-0 w-full max-w-3xl shrink-0 flex-col px-4 pt-[calc(0.85rem+env(safe-area-inset-top))] pb-[calc(1.6rem+env(safe-area-inset-bottom))] sm:px-10 md:pt-[calc(4.5rem+env(safe-area-inset-top))] md:pb-[calc(3.75rem+env(safe-area-inset-bottom))]"
+            >
+              {loadingToc ? (
+                <div className="flex flex-1 flex-col items-center justify-center">
+                  <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
+                  <p className={`mt-3 text-sm ${styles.muted}`}>正在打开书籍...</p>
+                </div>
+              ) : displayError ? (
+                <div className="my-auto rounded-2xl border border-rose-300/60 bg-rose-500/10 p-8 text-center">
+                  <p className="text-sm font-medium text-rose-600 dark:text-rose-400">
+                    {displayError}
+                  </p>
+                  <Link
+                    to="/"
+                    className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-4 py-2 text-xs font-medium text-white"
+                  >
+                    返回书架
+                  </Link>
+                </div>
+              ) : !toc || toc.chapters.length === 0 ? (
+                <div className="my-auto text-center">
+                  <p className={`text-sm ${styles.muted}`}>
+                    {toc?.parse_status === 'completed'
+                      ? '这本书暂未提取到可阅读章节。'
+                      : '这本书尚未解析完成，请稍后返回书架查看。'}
+                  </p>
+                  <Link
+                    to="/"
+                    className={`mt-5 inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-xs font-medium ${styles.button}`}
+                  >
+                    返回书架
+                  </Link>
+                </div>
+              ) : loadingChapter && !chapter ? (
+                <div className="flex flex-1 flex-col items-center justify-center">
+                  <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
+                  <p className={`mt-3 text-sm ${styles.muted}`}>正在加载章节正文...</p>
+                </div>
+              ) : chapter ? (
+                <div
+                  className={`min-h-0 flex-1 transition-opacity duration-150 ${
+                    loadingChapter ? 'opacity-50' : 'opacity-100'
+                  }`}
                 >
-                  返回书架
-                </Link>
-              </div>
-            ) : loadingChapter && !chapter ? (
-              <div className="flex flex-1 flex-col items-center justify-center">
-                <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
-                <p className={`mt-3 text-sm ${styles.muted}`}>正在加载章节正文...</p>
-              </div>
-            ) : chapter ? (
-              <div
-                className={`min-h-0 flex-1 transition-opacity duration-150 ${
-                  loadingChapter ? 'opacity-50' : 'opacity-100'
-                }`}
-              >
-                <PaginatedChapterView
-                  ref={paginatedRef}
-                  chapter={chapter}
-                  chapterPosition={currentChapterPosition}
-                  totalChapters={toc.chapters.length}
-                  mode={readingMode}
-                  fontSize={fontSize}
-                  theme={theme}
-                  landing={paginatedLanding}
-                  onPageStateChange={handlePaginatedStateChange}
-                  onUserPageTurn={handlePaginatedUserTurn}
-                  onRequestPrevChapter={goPrevChapter}
-                  onRequestNextChapter={goNextChapter}
-                  onToggleChrome={toggleChrome}
-                  onImageClick={setInlineLightbox}
-                />
-              </div>
-            ) : null}
-          </main>
+                  <PaginatedChapterView
+                    ref={paginatedRef}
+                    chapter={chapter}
+                    chapterPosition={currentChapterPosition}
+                    totalChapters={toc.chapters.length}
+                    mode={readingMode}
+                    fontSize={fontSize}
+                    theme={theme}
+                    landing={paginatedLanding}
+                    onPageStateChange={handlePaginatedStateChange}
+                    onUserPageTurn={handlePaginatedUserTurn}
+                    onRequestPrevChapter={goPrevChapter}
+                    onRequestNextChapter={goNextChapter}
+                    onToggleChrome={toggleChrome}
+                    onImageClick={setInlineLightbox}
+                  />
+                </div>
+              ) : null}
+            </main>
+
+            {/* PC Wide-Screen Right Blank Margin: click to go to next page */}
+            <div
+              role="button"
+              tabIndex={-1}
+              aria-label={
+                paginatedInfo.currentPage >= paginatedInfo.totalPages - 1 ? '下一章' : '下一页'
+              }
+              title={
+                canGoNextPage && !loadingChapter
+                  ? paginatedInfo.currentPage >= paginatedInfo.totalPages - 1
+                    ? '下一章'
+                    : '下一页'
+                  : undefined
+              }
+              onPointerDown={handleGutterPointerDown}
+              onClick={(e) => canGoNextPage && handleDesktopGutterClick('next', e)}
+              className={`group hidden min-w-[48px] flex-1 items-center justify-start pl-6 select-none min-[864px]:flex ${
+                canGoNextPage && !loadingChapter ? 'cursor-pointer' : 'cursor-default'
+              }`}
+            >
+              {canGoNextPage && !loadingChapter && (
+                <span
+                  aria-hidden="true"
+                  className="flex h-11 w-11 items-center justify-center rounded-full opacity-0 transition-all duration-200 group-hover:bg-current/5 group-hover:opacity-45"
+                >
+                  <ChevronRight className="h-6 w-6" strokeWidth={1.5} />
+                </span>
+              )}
+            </div>
+          </div>
 
           {/* Subtle minimal page progress indicator when toolbars are hidden in fullscreen */}
           {toc && chapter && !showToolbars && (

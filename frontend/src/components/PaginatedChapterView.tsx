@@ -8,6 +8,7 @@ import {
   useState,
   type CSSProperties,
   type MouseEvent,
+  type PointerEvent,
   type TouchEvent,
 } from 'react'
 import type { ChapterDetailResponse } from '../api/books'
@@ -46,6 +47,8 @@ interface PaginatedChapterViewProps {
 const COLUMN_GAP = 48
 const SWIPE_THRESHOLD_PX = 42
 const SWIPE_HORIZONTAL_RATIO = 1.4
+const CLICK_DRAG_MAX_PX = 8
+const DESKTOP_GUTTER_MIN_WIDTH = 864
 
 const LEAF_PAPER_STYLES: Record<'light' | 'sepia' | 'dark', string> = {
   light: 'bg-gradient-to-r from-stone-100 via-white to-stone-50 border-r border-stone-200',
@@ -199,6 +202,7 @@ export const PaginatedChapterView = forwardRef<
   const pendingLastPageRef = useRef<boolean>(landing.type === 'last')
   const flipTimerRef = useRef<number | null>(null)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+  const pointerDownRef = useRef<{ x: number; y: number } | null>(null)
   const lastSwipeAtRef = useRef<number>(0)
 
   // Pure illustration frontispiece chapters (0 text words) skip the large header block
@@ -409,6 +413,12 @@ export const PaginatedChapterView = forwardRef<
     [nextPage, prevPage, currentPage, totalPages],
   )
 
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.isPrimary && (event.pointerType !== 'mouse' || event.button === 0)) {
+      pointerDownRef.current = { x: event.clientX, y: event.clientY }
+    }
+  }
+
   const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
     if (event.touches.length !== 1) {
       touchStartRef.current = null
@@ -449,6 +459,13 @@ export const PaginatedChapterView = forwardRef<
       return
     }
 
+    // Ignore click if pointer moved > 8px (drag / swipe / text selection gesture)
+    const down = pointerDownRef.current
+    pointerDownRef.current = null
+    if (down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > CLICK_DRAG_MAX_PX) {
+      return
+    }
+
     const target = event.target as HTMLElement | null
     if (!target) {
       return
@@ -462,8 +479,8 @@ export const PaginatedChapterView = forwardRef<
       return
     }
 
-    // Priority 2: Do not turn page if clicking interactive elements or selecting text
-    if (target.closest('a, button')) {
+    // Priority 2: Do not trigger on interactive elements or non-empty text selection
+    if (target.closest('a, button, input, textarea')) {
       return
     }
     const selection = window.getSelection()
@@ -471,13 +488,29 @@ export const PaginatedChapterView = forwardRef<
       return
     }
 
-    const rect = event.currentTarget.getBoundingClientRect()
-    if (rect.width <= 0) {
+    const viewportWidth = window.innerWidth
+    if (viewportWidth <= 0) {
       return
     }
 
-    // Priority 3: Left (<30%) prev, Right (>70%) next, Center (30%~70%) toggle toolbar chrome
-    const relativeX = (event.clientX - rect.left) / rect.width
+    const hasDesktopSideGutters =
+      viewportWidth >= DESKTOP_GUTTER_MIN_WIDTH &&
+      window.matchMedia('(pointer: fine)').matches
+
+    const relativeX = event.clientX / viewportWidth
+
+    // On desktop wide screens with clickable left/right side gutters:
+    // keep interior prose area free of page-turning so users can select/copy text freely.
+    // Clean clicks in the center 30%~70% still toggle toolbars.
+    if (hasDesktopSideGutters) {
+      if (relativeX >= 0.3 && relativeX <= 0.7) {
+        onToggleChrome()
+      }
+      return
+    }
+
+    // Mobile / touch / narrow viewport: 3-zone full-screen tap
+    // Left (0%~30%) -> prevPage, Center (30%~70%) -> toggle toolbars, Right (70%~100%) -> nextPage
     if (relativeX < 0.3) {
       prevPage()
     } else if (relativeX > 0.7) {
@@ -512,6 +545,7 @@ export const PaginatedChapterView = forwardRef<
   return (
     <div
       ref={frameRef}
+      onPointerDown={handlePointerDown}
       onClick={handleFrameClick}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
